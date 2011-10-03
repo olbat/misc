@@ -1,5 +1,5 @@
 #!/bin/bash -e
-#
+
 ####
 # shlog is a bash script that allow you to record a shell session by logging
 # command history and giving diff of edited files
@@ -34,6 +34,14 @@ function __shlog_path {
 	echo ${TMPDIR}/shlog/$$
 }
 
+function __shlog_usage {
+	echo "usage: shlog <command> [<param>]"
+	echo "commands:"
+	echo -e "\t- start\t\t\t: start a new recording session"
+	echo -e "\t- edit <filename>\t: edit a file and record the diff"
+	echo -e "\t- stop\t\t\t: stop a recording session and get the log"
+}
+
 function __realpath {
 	if [[ $# -gt 0 && "${1:0:1}" != "/" ]]
 	then
@@ -47,7 +55,7 @@ function __realpath {
 function shlog {
 	if [ $# -lt 1 ]
 	then
-		echo "usage: $0 <command> [args]"
+		__shlog_usage
 	else
 
 	case $1 in
@@ -62,8 +70,8 @@ function shlog {
 			fi
 
 			history -w
-			echo "user=${USER}, host=${HOSTNAME}, curpath=${PWD}"\
-				> $(__shlog_path)/session
+			echo -e "user\t: ${USER}\nhost\t: ${HOSTNAME}\n" \
+				"curpath\t: ${PWD}" > $(__shlog_path)/session
 			cp $HISTFILE $(__shlog_path)/`basename $HISTFILE`
 		fi
 		;;
@@ -73,26 +81,40 @@ function shlog {
 
 		history -w 
 
-		echo -e "Session: `cat $(__shlog_path)/session`\n"
-		echo "==COMMAND LOG=="
-		local tmpfiles=0
+		echo -e "== Session ==\n`cat $(__shlog_path)/session`\n"
+		echo "== Commands =="
+		local editfiles=0
 		local editlog=""
 
 		while read line
 		do
-			if [ -n "`echo $line | grep "$FUNCNAME edit"`" ]
+			if [ -n "`echo $line | grep "^$FUNCNAME"`" ]
 			then
-				let tmpfiles=tmpfiles+1
+
+			case `echo $line | cut -d' ' -f2` in
+			edit)
+
+				let editfiles=editfiles+1
 
 				local tmp=`cat $(__shlog_path)/files \
-					| sed -n "${tmpfiles}p"`
+					| sed -n "${editfiles}p"`
 				local tmpfilebase=`echo $tmp | cut -d " " -f1`
 				local realfile=`echo $tmp | cut -d " " -f2`
 
-				echo ">>> Edited $realfile, see [$tmpfiles]"
-				editlog="${editlog}\n[$tmpfiles] Edit $realfile"
+				echo ">>> Edit $realfile, see [$editfiles]"
+				editlog="${editlog}\n[$editfiles] Edit $realfile"
 				editlog="${editlog}\n$(cd $tmpfilebase && \
 					diff -U1 -NB old new)\n"
+				
+				;;
+			comment)
+				echo ">>> ${line#* * }"
+				;;
+			*)
+				echo $line
+				;;
+			esac
+
 			else
 				if [ "$USER" == "root" ]
 				then
@@ -101,13 +123,13 @@ function shlog {
 					local sufchr="$"
 				fi
 
-				echo ${USER}@${HOSTNAME}:.$sufchr $line
+				echo ${USER}@${HOSTNAME}$sufchr $line
 			fi
 		done < <(diff -BN $(__shlog_path)/`basename $HISTFILE` $HISTFILE \
 		| grep '^>.*$' | sed -e 's/^> //' -e '$d')
 		if [ -n "$editlog" ]
 		then
-			echo -n -e "\n==EDIT LOG==${editlog}"
+			echo -n -e "\n== Files ==${editlog}"
 		fi
 		echo
 		rm -Rf $(__shlog_path)
@@ -141,12 +163,11 @@ function shlog {
 			echo "No current session, use 'start' to create a new one"
 		fi
 		;;
+	comment)
+		echo "comment added"
+		;;
 	help)
-		echo "usage: shlog <command> [<param>]"
-		echo "commands:"
-		echo -e "\t- start\t\t\t: start a new recording session"
-		echo -e "\t- edit <filename>\t: edit a file and record the diff"
-		echo -e "\t- stop\t\t\t: stop a recording session and get the log"
+		__shlog_usage
 		;;
 	*)
 		echo "unknown command '$1'"
@@ -156,5 +177,6 @@ function shlog {
 fi
 
 }
+########
 
 echo 'shlog loaded with success !'
