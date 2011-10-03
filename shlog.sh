@@ -39,6 +39,7 @@ function __shlog_usage {
 	echo "commands:"
 	echo -e "\t- start\t\t\t: start a new recording session"
 	echo -e "\t- edit <filename>\t: edit a file and record the diff"
+	echo -e "\t- comment\t\t: add a comment"
 	echo -e "\t- stop\t\t\t: stop a recording session and get the log"
 }
 
@@ -70,8 +71,9 @@ function shlog {
 			fi
 
 			history -w
-			echo -e "user\t: ${USER}\nhost\t: ${HOSTNAME}\n" \
-				"curpath\t: ${PWD}" > $(__shlog_path)/session
+			echo -e "user\t: ${USER}\nhost\t: ${HOSTNAME}" \
+				"\ndate\t: `date +'%x %R'`\ncurpath\t: ${PWD}" \
+				> $(__shlog_path)/session
 			cp $HISTFILE $(__shlog_path)/`basename $HISTFILE`
 		fi
 		;;
@@ -178,5 +180,3 @@ fi
 
 }
 ########
-
-echo 'shlog loaded with success !'
