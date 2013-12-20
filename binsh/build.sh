@@ -1,7 +1,7 @@
 #!/bin/bash -e
 
 CC=gcc
-CFLAGS="-Wall -std=c99 -pedantic -O3 -fomit-frame-pointer"
+CFLAGS="-Wall -std=c99 -pedantic -O3 -fomit-frame-pointer -Wno-overlength-strings"
 
 SHBIN_SRC=$(pwd)/shbin.c
 BINSH_SRC=$(pwd)/binsh.c
