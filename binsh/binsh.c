@@ -31,7 +31,7 @@ int main(int argc, char **argv)
 	int fds[2];
 	unsigned int i;
 	size_t len;
-        char *args[argc+1];
+        char *args[argc+2];
 	char *key,*ptr;
 
 	ptr = 0;
@@ -64,16 +64,17 @@ int main(int argc, char **argv)
 
 	args[0] = "/bin/sh";
 	args[1] = "-s";
+	args[2] = "--";
 
 	if (ptr)
 		argc++;
 
-	for (i=2;i<argc;i++)
+	for (i=3;i<=argc;i++)
 	{
 		if (ptr)
-			args[i] = argv[i-1];
+			args[i] = argv[i-2];
 		else
-			args[i] = argv[i];
+			args[i] = argv[i-1];
 	}
 	args[i] = NULL;
 
