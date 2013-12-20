@@ -18,46 +18,74 @@
 
 #include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern char **environ;
 
+#define BUFF_SIZE 4
 /* #define SCRIPT "..." */
 
 int main(int argc, char **argv)
 {
-	if (argc > 1)
-        {
-	        int fds[2];
-	        unsigned int i;
-	        size_t len;
-                char *args[argc+1];
-	        char *key;
+	int fds[2];
+	unsigned int i;
+	size_t len;
+        char *args[argc+1];
+	char *key,*ptr;
 
-	        pipe(fds);
-	        close(STDIN_FILENO);
-	        dup2(fds[0], STDIN_FILENO);
+	ptr = 0;
 
-	        args[0] = "/bin/sh";
-	        args[1] = "-s";
-	        for (i=2;i < argc;i++)
-	        	args[i] = argv[i];
-	        args[i] = NULL;
+	if ((argc > 1) && (strcmp(argv[1],"-")) && (isatty(STDIN_FILENO)))
+	{
+		key = argv[1];
+		len = strlen(key);
+	}
+	else
+	{
+		size_t tmp;
 
-	        key = argv[1];
-	        len = strlen(key);
-	        for (i=0;i < (sizeof(SCRIPT)-1);i++)
-	        	write(fds[1],&(char){SCRIPT[i]^key[(i+key[i%len])%len]},1);
-	        close(fds[1]);
+		key = malloc(BUFF_SIZE);
 
-	        execve(args[0], args, environ);
+		len = 0;
+		ptr = key;
+		while ((tmp = read(STDIN_FILENO,ptr,BUFF_SIZE)) > 0)
+		{
+			len += tmp;
+			if (tmp == BUFF_SIZE)
+				key = realloc(key,len+BUFF_SIZE);
+			ptr = key + len;
+		}
+	}
 
-	        perror("execve");
-	        return 1;
-        }
-        else
-        {
-		printf("usage: %s <key> <args>\n",*argv);
-                return 1;
-        }
+	pipe(fds);
+	close(STDIN_FILENO);
+	dup2(fds[0], STDIN_FILENO);
+
+	args[0] = "/bin/sh";
+	args[1] = "-s";
+
+	if (ptr)
+		argc++;
+
+	for (i=2;i<argc;i++)
+	{
+		if (ptr)
+			args[i] = argv[i-1];
+		else
+			args[i] = argv[i];
+	}
+	args[i] = NULL;
+
+	for (i=0;i<(sizeof(SCRIPT)-1);i++)
+		write(fds[1],&(char){SCRIPT[i]^key[(i+key[i%len])%len]},1);
+	close(fds[1]);
+
+	if (ptr)
+		free(key);
+
+	execve(args[0], args, environ);
+
+	perror("execve");
+	return 1;
 }

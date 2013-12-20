@@ -19,9 +19,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define PRINT_FORMAT "\\x%.2x"
+#define BUFF_SIZE 4
 #define PRINT_DISPLAY(F,C) __extension__ \
 ({ \
 	printf(F,C); \
@@ -32,27 +34,49 @@ static int fd;
 
 int main(int argc, char **argv)
 {
-	if (argc > 2)
+	char *key,*ptr;
+	unsigned char c;
+	unsigned int i;
+	size_t len;
+
+	if (argc < 2)
 	{
-		char *key;
-		unsigned char c;
-		unsigned int i;
-		size_t len;
+		printf("usage: %s <file> [<key>|-]\n",*argv);
+                return 1;
+	}
 
-		key = *(argv + 2);
+	ptr = 0;
+
+	if ((argc > 2) && (strcmp(argv[2],"-")))
+	{
+		key = argv[2];
 		len = strlen(key);
-
-		fd = open(*(argv + 1), O_RDONLY);
-		for (i=0;read(fd,&c,sizeof(c)) > 0;i++)
-			PRINT_DISPLAY(PRINT_FORMAT,c^key[(i + key[i%len])%len]);
-		close(fd);
-
-		puts("");
-	        return 0;
 	}
 	else
 	{
-		printf("usage: %s <file> <key>\n",*argv);
-                return 1;
+		size_t tmp;
+
+		key = malloc(BUFF_SIZE);
+
+		len = 0;
+		ptr = key;
+		while ((tmp = read(STDIN_FILENO,ptr,BUFF_SIZE)) > 0)
+		{
+			len += tmp;
+			if (tmp == BUFF_SIZE)
+				key = realloc(key,len+BUFF_SIZE);
+			ptr = key + len;
+		}
 	}
+
+	fd = open(argv[1], O_RDONLY);
+	for (i=0;read(fd,&c,sizeof(c)) > 0;i++)
+		PRINT_DISPLAY(PRINT_FORMAT,c^key[(i + key[i%len])%len]);
+	close(fd);
+
+	if (ptr)
+		free(key);
+
+	puts("");
+        return 0;
 }
