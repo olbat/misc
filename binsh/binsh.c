@@ -23,7 +23,7 @@
 
 extern char **environ;
 
-#define BUFF_SIZE 4
+#define BUFF_SIZE 1024
 /* #define SCRIPT "..." */
 
 int main(int argc, char **argv)

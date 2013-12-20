@@ -23,7 +23,7 @@
 #include <string.h>
 
 #define PRINT_FORMAT "\\x%.2x"
-#define BUFF_SIZE 4
+#define BUFF_SIZE 1024
 #define PRINT_DISPLAY(F,C) __extension__ \
 ({ \
 	printf(F,C); \
