@@ -75,9 +75,9 @@ class PokeTwitch
   def msg_handler()
     @handler = Thread.new do
       until @quit
-        msg = recv()
-        break unless msg
-        msg = msg.split(/\s+/,4)
+        dat = recv()
+        break unless dat
+        msg = dat.split(/\s+/,4)
         if msg[0] == "PING"
           send("PONG #{msg[1]}")
         elsif msg[1] == "PRIVMSG"
@@ -85,6 +85,8 @@ class PokeTwitch
             @count += 1
             puts("<#{msg[0].split('!',2)[0][1..-1]}> #{msg[3][1..-1]}") unless @opts[:quiet]
           end
+        elsif dat !~ /#{@chan}/
+          puts "DEBUG| #{dat}" if @opts[:debug]
         end
       end
     end
@@ -170,14 +172,14 @@ class PokeTwitch
 
   protected
   def send(msg)
-    puts "SEND: #{msg}\n" if @opts[:verbose]
+    puts "SEND| #{msg}\n" if @opts[:verbose]
     @sock.puts "#{msg}\r\n" if @sock
   end
 
   def recv()
     begin
       ret = @sock.gets if @sock
-      puts "RECV: #{ret}" if @opts[:verbose]
+      puts "RECV| #{ret}" if @opts[:verbose]
       ret
     rescue IOError => ioe
       raise ioe unless @quit
@@ -208,10 +210,13 @@ o = OptionParser.new do |opts|
   opts.on("-i", "--[no-]interactive", "Interactively choose action to perform instead of doing random") do |i|
     options[:interactive] = i
   end
+  opts.on("-d", "--[no-]debug", "Display unknown IRC messages") do |d|
+    options[:debug] = d
+  end
   opts.on("-q", "--[no-]quiet", "Quiet mode (do not display IRC messages)") do |q|
     options[:quiet] = q
   end
-  opts.on("-v", "--[no-]verbose", "Run verbosely") do |v|
+  opts.on("-v", "--[no-]verbose", "Run verbosely (display every IRC messages)") do |v|
     options[:verbose] = v
   end
 end
