@@ -28,6 +28,7 @@ class PokeTwitch
     @opts = opts
     @count = 0
     @sent = 0
+    @start = nil
     @sock = nil
     @main = nil
     @handler = nil
@@ -106,6 +107,7 @@ class PokeTwitch
           STDIN.gets
           puts "Messages: #{@count}"
           puts "Sent: #{@sent}"
+          puts "Time: #{(Time.now-@start).round(1)}s"
         end
       end
     end
@@ -143,6 +145,7 @@ class PokeTwitch
       connect()
       auth()
       msg_handler()
+      @start = Time.now
       send("JOIN #{@chan}")
       puts "Joined #{@chan}"
       in_loop() unless @opts[:interactive]
