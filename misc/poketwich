@@ -236,5 +236,9 @@ begin
   $pt.launch
   $pt.wait
 rescue IOError
-  retry if !$quit
+  if !$quit
+    puts "Disconnected, retry in 30s ..."
+    sleep 30
+    retry
+  end
 end
