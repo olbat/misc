@@ -1,0 +1,240 @@
+#!/usr/bin/ruby -w
+# Bot/Client to play to TwitchPlaysPokemon
+#   (see http://www.twitch.tv/twitchplayspokemon)
+
+require 'thread'
+require 'socket'
+require 'timeout'
+require 'optparse'
+
+Thread.abort_on_exception = true
+
+trap('SIGINT') { $quit=true; $pt.quit if $pt; puts "Quit !" }
+USAGE = "Usage: #{$0} [options] <user> [<pass>]"
+
+SERVER="199.9.252.26"
+PORT=6667
+CHANNEL="#twitchplayspokemon"
+
+class PokeTwitch
+  attr_reader :count, :sent
+
+  def initialize(server,port,nick,chan,pass=nil,opts={})
+    @server = server
+    @port = port
+    @nick = nick
+    @pass = pass
+    @chan = chan
+    @opts = opts
+    @count = 0
+    @sent = 0
+    @sock = nil
+    @main = nil
+    @handler = nil
+    @loop = nil
+    @quit = false
+    @actions = [
+      'up',
+      'down',
+      'left',
+      'right',
+      'a',
+      'b',
+      'start',
+      'democracy',
+      'anarchy',
+    ]
+  end
+
+  def connect
+    @sock.close if @sock and !@sock.closed?
+    begin
+      begin
+        Timeout.timeout(10) do
+          @sock = TCPSocket.open(@server,@port)
+        end
+      rescue Timeout::Error
+        error("Connection to #{@server}:#{@port} timed out")
+      end
+      puts "Connected to #{@server}:#{@port}"
+    rescue Exception => e
+      error("Connection failed (#{e.class.name}: #{e.message})")
+    end
+  end
+
+  def auth()
+    send("PASS #{@pass}") if @pass
+    send("NICK #{@nick}")
+    send("USER #{@nick} 0 * :#{@opts[:realname]||@nick}")
+    msg = recv().split(/\s+/,3)
+    error("Authentication failed (#{msg[1]})") if msg[1] != "001"
+    puts "Authentified (#{@nick})"
+  end
+
+  def msg_handler()
+    @handler = Thread.new do
+      until @quit
+        msg = recv()
+        break unless msg
+        msg = msg.split(/\s+/,4)
+        if msg[0] == "PING"
+          send("PONG #{msg[1]}")
+        elsif msg[1] == "PRIVMSG"
+          if msg.size >= 4 and msg[2] == @chan
+            @count += 1
+            puts("<#{msg[0].split('!',2)[0][1..-1]}> #{msg[3][1..-1]}") unless @opts[:quiet]
+          end
+        end
+      end
+    end
+  end
+
+  def in_choose()
+    puts "Choose one action:"
+    @actions.each_index do |i|
+      puts "[#{i}] #{@actions[i]}"
+    end
+    $stdout.write "> "
+    $stdout.flush
+    @actions[STDIN.gets.to_i]
+  end
+
+  def in_loop()
+    @loop = Thread.new do
+      if STDIN.tty? and !STDIN.closed?
+        until @quit
+          STDIN.gets
+          puts "Messages: #{@count}"
+          puts "Sent: #{@sent}"
+        end
+      end
+    end
+  end
+
+  def action()
+    @actions[rand(0..@actions.size)]
+  end
+
+  def quit()
+    unless @quit
+      @quit = true
+      send("QUIT :bye bye")
+
+      @sock.close if @sock and !@sock.closed?
+      @sock = nil
+
+      @main.kill if @main and @main != Thread.current
+      @main = nil
+      @handler.kill if @handler
+      @handler = nil
+      @loop.kill if @loop
+      @loop = nil
+    end
+  end
+
+  def error(msg)
+    $stderr.puts msg
+    quit()
+    exit! 1
+  end
+
+  def launch()
+    @main = Thread.new do
+      connect()
+      auth()
+      msg_handler()
+      send("JOIN #{@chan}")
+      puts "Joined #{@chan}"
+      in_loop() unless @opts[:interactive]
+      until @quit
+        act = nil
+        if @opts[:interactive]
+          act = in_choose()
+        else
+          sleep rand((@opts[:timer_min]||20)..(@opts[:timer_max]||60))
+          act = action()
+        end
+        send("PRIVMSG #{@chan} :#{act}")
+        puts("<#{@nick}> #{act}") unless @opts[:quiet]
+        @sent += 1
+      end
+    end
+  end
+
+  def wait
+    sleep 1 while @main and @main.alive?
+  end
+
+  protected
+  def send(msg)
+    puts "SEND: #{msg}\n" if @opts[:verbose]
+    @sock.puts "#{msg}\r\n" if @sock
+  end
+
+  def recv()
+    begin
+      ret = @sock.gets if @sock
+      puts "RECV: #{ret}" if @opts[:verbose]
+      ret
+    rescue IOError => ioe
+      raise ioe unless @quit
+    end
+  end
+end
+
+
+options = {}
+o = OptionParser.new do |opts|
+  opts.banner = USAGE
+
+  opts.on("-s", "--server SERVER", "Specify the server") do |s|
+    options[:server] = s
+  end
+  opts.on("-p", "--server PORT", Integer, "Specify the port") do |p|
+    options[:port] = p
+  end
+  opts.on("-c", "--chan CHANNEL", /^#.*$/, "Specify the channel") do |c|
+    options[:channel] = c
+  end
+  opts.on("-m", "--timer-min VALUE", Integer, "Min value the random sleep") do |v|
+    options[:timer_min] = v
+  end
+  opts.on("-M", "--timer-max VALUE", Integer, "Max value the random sleep") do |v|
+    options[:timer_max] = v
+  end
+  opts.on("-i", "--[no-]interactive", "Interactively choose action to perform instead of doing random") do |i|
+    options[:interactive] = i
+  end
+  opts.on("-q", "--[no-]quiet", "Quiet mode (do not display IRC messages)") do |q|
+    options[:quiet] = q
+  end
+  opts.on("-v", "--[no-]verbose", "Run verbosely") do |v|
+    options[:verbose] = v
+  end
+end
+begin
+  o.parse!
+rescue OptionParser::InvalidArgument => e
+  $stderr.puts e.message
+  exit 1
+end
+
+if ARGV.size < 1
+  $stderr.puts USAGE
+  exit 1
+end
+
+begin
+  $pt = PokeTwitch.new(
+    options[:server]||SERVER,
+    options[:port]||PORT,
+    ARGV[0],
+    options[:channel]||CHANNEL,
+    ARGV[1],
+    options
+  )
+  $pt.launch
+  $pt.wait
+rescue IOError
+  retry if !$quit
+end
