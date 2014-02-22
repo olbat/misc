@@ -195,7 +195,7 @@ o = OptionParser.new do |opts|
   opts.on("-s", "--server SERVER", "Specify the server") do |s|
     options[:server] = s
   end
-  opts.on("-p", "--server PORT", Integer, "Specify the port") do |p|
+  opts.on("-p", "--port PORT", Integer, "Specify the port") do |p|
     options[:port] = p
   end
   opts.on("-c", "--chan CHANNEL", /^#.*$/, "Specify the channel") do |c|
