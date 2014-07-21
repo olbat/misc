@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+
+# Copyright (C) 2014 Sarzyniec Luc <contact@olbat.net>
+# see the COPYING file for more informations
+
+# This hook enables Gerrit to post comments on a bugzilla bug tracker depending
+# on the bug# contained in the topic of the Gerrit patchset
+#
+# By default, the hook is enabled only for the first patch, with a topic
+# following the pattern "bug/ID" and it's not working with drafts
+
+require 'optparse'
+require 'ostruct'
+require 'json'
+require 'cgi'
+require 'restclient'
+
+BUGZILLA_API='http://my.bugzilla.tld/jsonrpc.cgi'
+BUGZILLA_LOGIN='gerrit_login'
+BUGZILLA_PASSWORD='gerrit_password'
+
+TOPIC_PREFIX='bug/'
+DISCARD_DRAFTS=true
+NOTIFY_ON_FIRST_PATCHSET_ONLY=true
+
+# The tokens <SWITCH_NAME> will be replaced by their respective values
+MESSAGE_TEMPLATE="A new change was submited on Gerrit: <CHANGE-URL>.\n\nChange#: <CHANGE>\nCommit#: <COMMIT>\nAuthor: <UPLOADER>"
+
+
+SWITCHES=[
+  'change',
+  'is-draft',
+  'change-url',
+  'project',
+  'branch',
+  'topic',
+  'uploader',
+  'commit',
+  'patchset',
+]
+
+args = {}
+
+opt_parser = OptionParser.new do |opts|
+  SWITCHES.each {|s| opts.on("--#{s} VALUE") { |v| args[s] = v } }
+end
+opt_parser.parse!(ARGV)
+
+args['is-draft'] = (args['is-draft'].downcase == 'true') if args['is-draft']
+args['patchset'] = args['patchset'].to_i if args['patchset']
+
+
+if args['topic'] =~ /^#{TOPIC_PREFIX}(\d+)$/
+  id = $1.to_i
+  if (DISCARD_DRAFTS and !args['is-draft']) or !DISCARD_DRAFTS
+    if (NOTIFY_ON_FIRST_PATCHSET_ONLY and args['patchset'] == 1) or !NOTIFY_ON_FIRST_PATCHSET_ONLY
+
+      comment = MESSAGE_TEMPLATE.dup
+      SWITCHES.each {|s| comment.gsub!(/<#{s.upcase}>/,args[s].to_s)}
+
+      params = {
+        'method' => 'Bug.add_comment',
+        'params' => [{
+          'id' => id,
+          'comment' => CGI.escapeHTML(comment),
+          'Bugzilla_login' => BUGZILLA_LOGIN,
+          'Bugzilla_password' => BUGZILLA_PASSWORD,
+        }],
+        'id' => id,
+      }
+
+      ret = RestClient.post(BUGZILLA_API, params.to_json,
+        :content_type => :json, :accept => :json)
+
+      begin
+        ret = JSON.parse(ret)
+      rescue Exception => e
+        $stderr.puts "#{e.class.name}: #{e.message}"
+        exit 1
+      end
+
+      if ret['error'] and !ret['error'].empty?
+        $stderr.puts ret['error']
+        exit 1
+      else
+        exit 0
+      end
+
+    end
+  end
+end
