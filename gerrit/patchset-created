@@ -23,7 +23,13 @@ DISCARD_DRAFTS=true
 NOTIFY_ON_FIRST_PATCHSET_ONLY=true
 
 # The tokens <SWITCH_NAME> will be replaced by their respective values
-MESSAGE_TEMPLATE="A new change was submited on Gerrit: <CHANGE-URL>.\n\nChange#: <CHANGE>\nCommit#: <COMMIT>\nAuthor: <UPLOADER>"
+MESSAGE_TEMPLATE=<<-EOS
+A new change was submited on Gerrit: <CHANGE-URL>.
+
+Change#: <CHANGE>
+Commit#: <COMMIT>
+Author: <UPLOADER>
+EOS
 
 
 SWITCHES=[
