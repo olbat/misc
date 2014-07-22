@@ -1,0 +1,133 @@
+#!/usr/bin/env ruby
+
+# Copyright (C) 2014 Sarzyniec Luc <contact@olbat.net>
+# see the COPYING file for more informations
+
+# This hook enables Gerrit to post comments on a bugzilla 3/4 bug tracker
+# depending on the bug# contained in the topic of the Gerrit patchset
+#
+# By default, the hook is enabled only for the first patch, with a topic
+# following the pattern "bug/ID" and it's not working with drafts
+
+require 'optparse'
+require 'ostruct'
+require 'json'
+require 'base64'
+require 'restclient'
+
+BUGZILLA_API='http://my.bugzilla.tld/jsonrpc.cgi'
+BUGZILLA_LOGIN='bugzilla_gerrit_login'
+BUGZILLA_PASSWORD='bugzilla_gerrit_password'
+
+GERRIT_API='http://my.gerrit.tld/'
+GERRIT_LOGIN=nil
+GERRIT_PASSWORD=nil
+
+TOPIC_PREFIX='bug/'
+ATTACH_PATCH_TO_BUG=true
+
+# The tokens <SWITCH_NAME> will be replaced by their respective values
+MESSAGE_TEMPLATE=<<-EOS
+A new patch has been merged in the <PROJECT> project's Git repository: <CHANGE-URL>.
+
+Change#: <CHANGE>
+Commit#: <COMMIT>
+Branch: <BRANCH>
+EOS
+PATCH_SUMMARY_TEMPLATE='Patch of the Git commit #<COMMIT>@<PROJECT>.'
+
+POST_PLAIN_TEXT_PATCH=false
+
+SWITCHES=[
+  'change',
+  'change-url',
+  'project',
+  'branch',
+  'topic',
+  'submitter',
+  'commit',
+  'patchset',
+]
+
+args = {}
+
+opt_parser = OptionParser.new do |opts|
+  SWITCHES.each {|s| opts.on("--#{s} VALUE") { |v| args[s] = v } }
+end
+opt_parser.parse!(ARGV)
+
+if args['topic'] =~ /^#{TOPIC_PREFIX}(\d+)$/
+  id = $1.to_i
+  comment = MESSAGE_TEMPLATE.dup
+  SWITCHES.each {|s| comment.gsub!(/<#{s.upcase}>/,args[s].to_s)}
+  params = nil
+
+  if ATTACH_PATCH_TO_BUG
+    summary = PATCH_SUMMARY_TEMPLATE.dup
+    SWITCHES.each {|s| summary.gsub!(/<#{s.upcase}>/,args[s].to_s)}
+
+    uri = URI(File.join(GERRIT_API,'changes',args['change'],'revisions',
+      'current','patch'))
+    
+    uri.user = GERRIT_LOGIN if GERRIT_LOGIN and !GERRIT_LOGIN.empty?
+    uri.password = GERRIT_PASSWORD if GERRIT_PASSWORD and !GERRIT_PASSWORD.empty?
+    patch = RestClient.get(uri.to_s)
+
+    if !patch or patch.empty?
+      $stderr.puts "Error: Gerrit returned an empty patch"
+      exit 1
+    end
+
+    if POST_PLAIN_TEXT_PATCH
+      begin
+        patch = Base64.decode64(patch)
+      rescue Exception => e
+        $stderr.puts "Error: the patch returned by Gerrit is not in base64"
+        $stderr.puts "#{e.class.name}: #{e.message}"
+        exit 1
+      end
+    end
+
+    params = {
+      'method' => 'Bug.add_attachment',
+      'params' => [{
+        'ids' => [id],
+        'file_name' => "#{args['project']}-#{args['branch']}-#{args['commit']}.patch",
+        'is_patch' => true,
+	'summary' => summary,
+        'content_type' => 'text/plain',
+        'data' => patch,
+        'comment' => comment,
+        'Bugzilla_login' => BUGZILLA_LOGIN,
+        'Bugzilla_password' => BUGZILLA_PASSWORD,
+      }],
+      'id' => id,
+    }
+  else
+    params = {
+      'method' => 'Bug.add_comment',
+      'params' => [{
+        'id' => id,
+        'comment' => comment,
+        'Bugzilla_login' => BUGZILLA_LOGIN,
+        'Bugzilla_password' => BUGZILLA_PASSWORD,
+      }],
+      'id' => id,
+    }
+  end
+
+  ret = RestClient.post(BUGZILLA_API, params.to_json,
+    :content_type => :json, :accept => :json)
+
+  begin
+    ret = JSON.parse(ret)
+  rescue Exception => e
+    $stderr.puts "#{e.class.name}: #{e.message}"
+    exit 1
+  end
+
+  if ret['error'] and !ret['error'].empty?
+    $stderr.puts ret['error']
+    exit 1
+  end
+end
