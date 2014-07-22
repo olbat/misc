@@ -12,7 +12,6 @@
 require 'optparse'
 require 'ostruct'
 require 'json'
-require 'cgi'
 require 'restclient'
 
 BUGZILLA_API='http://my.bugzilla.tld/jsonrpc.cgi'
@@ -62,7 +61,7 @@ if args['topic'] =~ /^#{TOPIC_PREFIX}(\d+)$/
         'method' => 'Bug.add_comment',
         'params' => [{
           'id' => id,
-          'comment' => CGI.escapeHTML(comment),
+          'comment' => comment,
           'Bugzilla_login' => BUGZILLA_LOGIN,
           'Bugzilla_password' => BUGZILLA_PASSWORD,
         }],
