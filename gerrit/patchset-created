@@ -3,8 +3,8 @@
 # Copyright (C) 2014 Sarzyniec Luc <contact@olbat.net>
 # see the COPYING file for more informations
 
-# This hook enables Gerrit to post comments on a bugzilla bug tracker depending
-# on the bug# contained in the topic of the Gerrit patchset
+# This hook enables Gerrit to post comments on a bugzilla 3/4 bug tracker
+# depending on the bug# contained in the topic of the Gerrit patchset
 #
 # By default, the hook is enabled only for the first patch, with a topic
 # following the pattern "bug/ID" and it's not working with drafts
