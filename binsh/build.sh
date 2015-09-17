@@ -3,14 +3,14 @@
 CC=gcc
 CFLAGS="-Wall -std=c99 -pedantic -O3 -fomit-frame-pointer -Wno-overlength-strings"
 
-SHBIN_SRC=$(pwd)/shbin.c
+ENCRYPT_SRC=$(pwd)/encrypt.c
 BINSH_SRC=$(pwd)/binsh.c
-SHBIN=$(pwd)/$(basename $SHBIN_SRC .c)
+ENCRYPT=$(pwd)/$(basename $ENCRYPT_SRC .c)
 BINSH=${3:-$(pwd)/$(basename $BINSH_SRC .c)}
 
-if [ ! -e "${SHBIN_SRC}" ]
+if [ ! -e "${ENCRYPT_SRC}" ]
 then
-        echo "$SHBIN_SRC file is missing"
+        echo "$ENCRYPT_SRC file is missing"
         exit 1
 fi
 
@@ -26,8 +26,8 @@ then
         exit 1
 fi
 
-${CC} ${CFLAGS} -o $SHBIN $SHBIN_SRC
-chmod +x $SHBIN
+${CC} ${CFLAGS} -o $ENCRYPT $ENCRYPT_SRC
+chmod +x $ENCRYPT
 
 if [ -t 0 ]
 then
@@ -36,10 +36,10 @@ then
 	        echo "usage: $0 <script> [<key>|- <output>]"
 	        exit 1
 	else
-		SCRIPT='"'$($SHBIN $1 $2)'"'
+		SCRIPT='"'$($ENCRYPT $1 $2)'"'
 	fi
 else
-	SCRIPT='"'$(cat | $SHBIN $1 $2)'"'
+	SCRIPT='"'$(cat | $ENCRYPT $1 $2)'"'
 fi
 
 ${CC} ${CFLAGS} -o $BINSH $BINSH_SRC -DSCRIPT=$SCRIPT
