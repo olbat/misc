@@ -20,9 +20,9 @@ then
         exit 1
 fi
 
-if [ $# -lt 1 ]
+if [ $# -lt 2 ]
 then
-        echo "usage: $0 <script> [<key>|- <output>]"
+        echo "usage: $0 <script> <key>|- [<output>]"
         exit 1
 fi
 
@@ -33,7 +33,7 @@ if [ -t 0 ]
 then
 	if [ $# -lt 2 ]
 	then
-	        echo "usage: $0 <script> [<key>|- <output>]"
+	        echo "usage: $0 <script> <key>|- [<output>]"
 	        exit 1
 	else
 		SCRIPT='"'$($ENCRYPT $1 $2)'"'

@@ -24,6 +24,7 @@
 extern char **environ;
 
 #define BUFF_SIZE 1024
+#define SWRITE(F,S) write(F,S,sizeof(S))
 /* #define SCRIPT "..." */
 
 int main(int argc, char **argv)
@@ -36,26 +37,34 @@ int main(int argc, char **argv)
 
 	ptr = 0;
 
-	if ((argc > 1) && (strcmp(argv[1],"-")) && (isatty(STDIN_FILENO)))
+	if (argc > 1)
 	{
-		key = argv[1];
-		len = strlen(key);
+		if (!strncmp(argv[1],"-",2) && !isatty(STDIN_FILENO))
+		{
+			size_t tmp;
+
+			key = malloc(BUFF_SIZE);
+
+			len = 0;
+			ptr = key;
+			while ((tmp = read(STDIN_FILENO,ptr,BUFF_SIZE)) > 0)
+			{
+				len += tmp;
+				if (tmp == BUFF_SIZE)
+					key = realloc(key,len+BUFF_SIZE);
+				ptr = key + len;
+			}
+		}
+		else
+		{
+			key = argv[1];
+			len = strlen(key);
+		}
 	}
 	else
 	{
-		size_t tmp;
-
-		key = malloc(BUFF_SIZE);
-
-		len = 0;
-		ptr = key;
-		while ((tmp = read(STDIN_FILENO,ptr,BUFF_SIZE)) > 0)
-		{
-			len += tmp;
-			if (tmp == BUFF_SIZE)
-				key = realloc(key,len+BUFF_SIZE);
-			ptr = key + len;
-		}
+		SWRITE(1,"key missing\n");
+		return 1;
 	}
 
 	pipe(fds);
@@ -66,16 +75,10 @@ int main(int argc, char **argv)
 	args[1] = "-s";
 	args[2] = "--";
 
-	if (ptr)
-		argc++;
 
 	for (i=3;i<=argc;i++)
-	{
-		if (ptr)
-			args[i] = argv[i-2];
-		else
-			args[i] = argv[i-1];
-	}
+		args[i] = argv[i-1];
+
 	args[i] = NULL;
 
 	for (i=0;i<(sizeof(SCRIPT)-1);i++)
