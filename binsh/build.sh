@@ -22,7 +22,8 @@ fi
 
 if [ $# -lt 2 ]
 then
-        echo "usage: $0 <script> <key>|- [<output>]"
+        echo "usage: $0 <script> <passphrase>|- [<output>] "\
+		"[<shell> <exec> <command> <...>]"
         exit 1
 fi
 
@@ -33,7 +34,8 @@ if [ -t 0 ]
 then
 	if [ $# -lt 2 ]
 	then
-	        echo "usage: $0 <script> <key>|- [<output>]"
+	        echo "usage: $0 <script> <passphrase>|- [<output>] "\
+			"[<shell> <exec> <command> <...>]"
 	        exit 1
 	else
 		SCRIPT='"'$($ENCRYPT $1 $2)'"'
@@ -42,7 +44,18 @@ else
 	SCRIPT='"'$(cat | $ENCRYPT $1 $2)'"'
 fi
 
-${CC} ${CFLAGS} -o $BINSH $BINSH_SRC -DSCRIPT=$SCRIPT
+if [ $# -gt 4 ]
+then
+	SHELL=""
+	for a in "${@:4}"
+	do
+		SHELL=${SHELL}${a}'\x0'
+	done
+	SHELL='"'$SHELL'"'
+	${CC} ${CFLAGS} -o $BINSH $BINSH_SRC -DSCRIPT=$SCRIPT -DSHELL="$SHELL"
+else
+	${CC} ${CFLAGS} -o $BINSH $BINSH_SRC -DSCRIPT=$SCRIPT
+fi
 chmod +x $BINSH
 
 echo "Build of '$(basename $BINSH)' successful"

@@ -20,29 +20,33 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <alloca.h>
 
 extern char **environ;
 
 #define BUFF_SIZE 1024
 #define SWRITE(F,S) write(F,S,sizeof(S))
 /* #define SCRIPT "..." */
+#ifndef SHELL
+#define SHELL "/bin/sh\x0-s\x0--\x0"
+#endif
 
 int main(int argc, char **argv)
 {
 	int fds[2];
-	unsigned int i;
-	size_t len;
-        char *args[argc+2];
+	unsigned int i,j,k;
+	size_t len,tmp;
+        char **args;
 	char *key,*ptr;
 
-	ptr = 0;
+	tmp = 0;
 
+	/* Handle the key argument */
 	if (argc > 1)
 	{
+		/* The key is specified from STDIN */
 		if (!strncmp(argv[1],"-",2) && !isatty(STDIN_FILENO))
 		{
-			size_t tmp;
-
 			key = malloc(BUFF_SIZE);
 
 			len = 0;
@@ -67,27 +71,58 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	/* Reuse STDIN to pipe the script to the shell */
 	pipe(fds);
 	close(STDIN_FILENO);
 	dup2(fds[0], STDIN_FILENO);
 
-	args[0] = "/bin/sh";
-	args[1] = "-s";
-	args[2] = "--";
+	/* Count the number of arguments in the shell's command */
+	j = 0;
+	i = sizeof(SHELL);
+	while (i--)
+		if (!SHELL[i])
+			j++;
 
+	/* Allocate some memory for the arguments passed to execve():
+	 *   - the shell's command (i.e. ["/bin/bash", "-s", "--"])
+	 *   - the arguments actually passed to this program (without the key)
+	 *   - the final null argument
+	 */
+	args = (__typeof__(args)) alloca((j+argc-2)*sizeof(args));
 
-	for (i=3;i<=argc;i++)
-		args[i] = argv[i-1];
+	/* Copy the shell's command to args (split SHELL using '\x0') */
+	j=0;
+	ptr = SHELL;
+	for (i=0; i < (sizeof(SHELL)-1); i++)
+	{
+		if (!SHELL[i])
+		{
+			k = 0;
+			args[j] = (char *) alloca((SHELL+i)-ptr+1);
+			while (*ptr)
+				args[j][k++] = *ptr++;
+			ptr++;
+			args[j++][k] = 0;
+		}
+	}
 
+	/* Copy the program's arguments to args */
+	for (i=j;i<(argc+j-2);i++)
+		args[i] = argv[i-j+2];
+
+	/* Set the last element of args to null (necessary for execve()) */
 	args[i] = NULL;
 
+	/* Decrypt the script using the key */
 	for (i=0;i<(sizeof(SCRIPT)-1);i++)
 		write(fds[1],&(char){SCRIPT[i]^key[(i+key[i%len])%len]},1);
 	close(fds[1]);
 
-	if (ptr)
+	/* Clean dynamically allocated memory */
+	if (tmp)
 		free(key);
 
+	/* Run the script using the shell's command specified in SHELL */
 	execve(args[0], args, environ);
 
 	perror("execve");
