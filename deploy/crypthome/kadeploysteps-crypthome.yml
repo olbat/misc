@@ -1,0 +1,20 @@
+---
+BroadcastEnv:
+  send_environment:
+    pre-ops:
+    - name: send_cryptkey_file
+      action: send
+      file: cryptkey
+      destination: $KADEPLOY_TMP_DIR
+    - name: send_cryptenv_file
+      action: send
+      file: crypthome.env
+      destination: $KADEPLOY_TMP_DIR
+    - name: create_homepart
+      action: run
+      file: create-homepart.sh
+  install_bootloader:
+    pre-ops:
+    - name: config_homepart
+      action: run
+      file: config-homepart.sh
