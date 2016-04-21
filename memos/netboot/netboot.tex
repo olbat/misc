@@ -1,0 +1,629 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage{hyperref}
+\usepackage{multicol}
+
+\title{PXE network boot methods}
+\author{Luc Sarzyniec\\
+\footnotesize \texttt{\textless devel@olbat.net\textgreater}}
+\date{2013-02-21}
+
+\newcommand{\pro} {\item[$\oplus$]}
+\newcommand{\con} {\item[$\ominus$]}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Introduction to PXE boot}
+\subsection{Boot over the network procedure}
+\subsection{The PXE specifications}
+\subsection{Network Bootstrap Programs}
+\subsection{Configure a specific NBP on DHCP server\label{sec:dhcpconfig}}
+\subsubsection{ISC DHCP server}
+\subsubsection{dhcpcd}
+\subsubsection{dnsmasq}
+\newpage
+
+\section{Network Bootstrap Programs}
+\subsection{PXElinux}
+\paragraph{Features}
+\begin{itemize}
+  \item Download files from TFTP
+  \item Boots downloaded Linux kernels images
+  \item Boots COMBOOT images
+  \item Comes with different COMBOOTs (chain.c32 allow to chainload on hard disk's partitions)
+  \item Customizations possible with DHCP options
+  \item Boots nodes following a node-specific profile
+  \item Chainload other NBPs
+\end{itemize}
+\paragraph{Pros and Cons}
+\begin{itemize}
+  \pro Standard
+  \pro Stable
+  \pro A lot of custom COMBOOTs
+  \con Do not work with HTTP
+  \con Cannot boot local systems (the only solution is to chainload an installed bootloader with a COMBOOT)
+  \con Hard to embed on a NIC's PROM, so it's necessary to download the NBP at every boot
+\end{itemize}
+
+\subsection{GPXElinux}
+\paragraph{Features}
+Same as PXElinux, but it adds the support of HTTP and FTP.
+\newpage
+
+\subsection{iPXE}
+\paragraph{Features}
+\begin{itemize}
+  \item Download files from TFTP/HTTP/FTP
+  \item Boots downloaded Linux kernels images
+  \item Interactive shell
+  \item Manual configuration of NIC/Network
+  \item Scripting
+  \item Boot COMBOOT images (specific build)
+  \item Embedable on NIC's PROM
+  \item SAN compatible
+  \item Secure authentication settings
+  \item Logs on syslog server
+  \item Can boot nodes following a node-specific profile
+  \item Chainload other NBPs
+\end{itemize}
+\paragraph{Pros and Cons}
+\begin{itemize}
+  \pro Embedable on NIC PROM
+  \pro Interactive shell
+  \pro Scripting
+  \pro SAN compatible
+  \pro Secure authentication settings
+  \pro Logs on syslog server
+  \con Support of COMBOOTs is disabled by default
+  \con Cannot boot local systems (the only solution is to chainload an installed bootloader with a COMBOOT)
+\end{itemize}
+\newpage
+
+\subsection{GRUB2 disk}
+\paragraph{Features}
+\begin{itemize}
+  \item Download files from TFTP/HTTP
+  \item Boot downloaded Linux kernels images
+  \item Boot of local systems (support of a lot of OS brands)
+  \item Interactive shell
+  \item Manual configuration of NIC/Network
+  \item Scripting
+  \item Can boot nodes following a node-specific profile
+  \item Chainload other NBPs (buggy)
+\end{itemize}
+\paragraph{Pros and Cons}
+\begin{itemize}
+  \pro Boot of local systems (support of a lot of OS brands)
+  \pro Interactive shell
+  \pro Scripting
+  \con Not a main feature of the software (not really stable)
+  \con Not embedable on a NIC's PROM, so it's necessary to download the NBP at every boot
+\end{itemize}
+\newpage
+
+\subsection{Comparison of NBPs}
+\begin{tabular}{ | l | c | c | c | c | }
+\hline
+ & PXElinux & GPXElinux & iPXE & GRUB2 disk \\ \hline
+Download via TFTP & $\times$ & $\times$ & $\times$ & $\times$ \\ \hline
+Download via HTTP & & $\times$ & $\times$ & $\times$ \\ \hline
+Download via FTP & & $\times$ & $\times$ & \\ \hline
+Boot downloaded kernel images & $\times$ & $\times$ & $\times$ & $\times$ \\ \hline
+Load COMBOOTs & $\times$ & $\times$ & $\times$ & \\ \hline
+Embedable on NIC's PROM & $\sim$ & $\sim$ & $\times$ & \\ \hline
+Boots nodes following a profile & $\times$ & $\times$ & $\sim$ & $\sim$ \\ \hline
+Chainload other NBPs & $\times$ & $\times$ & $\times$ & $\sim$ \\ \hline
+Interactive shell & & & $\times$ & $\times$ \\ \hline
+Scripting & & & $\times$ & $\times$ \\ \hline
+Chainload another bootloader & $\times$ & $\times$ & $\times$ & $\times$ \\ \hline
+Boot of local systems & & & & $\times$ \\ \hline
+SAN compatibility & & & $\times$ & \\ \hline
+Secure authentication settings & & & $\times$ & \\ \hline
+Logs on syslog server & & & $\times$ & \\ \hline
+\end{tabular}
+
+\section{Install and configure NBPs}
+\subsection{PXElinux/GPXElinux\label{sec:config:pxelinux}}
+The software is packaged on most of Linux distros, the NBP files are included in the package \emph{syslinux}, you can also download the software at \url{http://www.kernel.org/pub/linux/utils/boot/syslinux/}.
+
+After you got the sources of PXElinux, you'll just have to copy the NBP file \emph{pxelinux.0} (or \emph{gpxelinux.0}) inside your PXE repository (TFTP or HTTP server). It's also necessary to configure your DHCP server to make it load this NBP (see section \ref{sec:dhcpconfig}).
+
+To understand how this NBP will boot the nodes depending on a specific profile, take a look to the section \ref{sec:profiles}.
+
+\subsection{iPXE\label{sec:config:ipxe}}
+The git repository of the software is available at \url{http://git.ipxe.org/ipxe.git}, you can have more information on the download of iPXE at \url{http://ipxe.org/download}.
+
+The source code (that is used to compile specific iPXE files) is available under the directory \texttt{src/}.
+
+\subsubsection{Boot a iPXE NBP from DHCP}
+You can generate an iPXE NBP named \texttt{undionly.kpxe} from the sources if you don't want to flash your NIC's. This file has to be loaded at boot time by the PXE-compatible NIC of nodes so it's necessary to configure the DHCP server to make this file be loaded at boot time (see section \ref{sec:dhcpconfig}).
+
+To generate \texttt{undionly.kpxe}, compile the file with:
+\begin{verbatim}
+  make bin/undionly.kpxe
+\end{verbatim}
+
+If you want to embed a configuration script in your NBP (what will be pretty useful in the section \ref{sec:profiles}), you can compile \emph{undionly.kpxe} with the command:
+\begin{verbatim}
+  make bin/undionly.kpxe EMBED=bootscript.ipxe
+\end{verbatim}
+Where \texttt{bootscript.ipxe} is a file containing the iPXE script.
+
+Further information are available on iPXE's website at \url{http://ipxe.org/howto/chainloading} and \url{http://ipxe.org/embed}.
+
+\subsubsection{Create an iPXE ROM to be burned on a NIC's PROM}
+To create a iPXE ROM that'll be burnable on a NIC's PROM, it's necessary to know the device ID and the vendor ID of the NIC.
+
+Under Linux, you can get the device ID in the \texttt{/sys/class/net/IFACENAME/device/device} file and the vendor ID in the \texttt{/sys/class/net/IFACENAME/device/vendor} file (\texttt{IFACENAME} is the name of your NIC, remove the prefix 0x in the following commands).
+
+You can also use \emph{lspci} as specified in \url{http://ipxe.org/howto/romburning}.
+
+After you got this two IDs, you can compile the rom using the command:
+\begin{verbatim}
+  make bin/VENDOR_IDDEVICE_ID.rom
+\end{verbatim}
+The vendor and device's IDs have to be concatenated and the hexadecimal number should be in lower case.
+
+If you want to embed a configuration script in your NBP (what will be pretty useful in the section \ref{sec:profiles}), you can compile the rom with the command:
+\begin{verbatim}
+  make bin/VENDOR_IDDEVICE_ID.rom EMBED=bootscript.ipxe
+\end{verbatim}
+Where \texttt{bootscript.ipxe} is a file containing the iPXE script.
+
+To burn this ROM on your NIC's PROM you can follow the instructions on iPXE website: \url{http://ipxe.org/howto/romburning/intel}.
+
+Further information are available on iPXE's website at \url{http://ipxe.org/howto/romburning} and \url{http://ipxe.org/embed}.
+
+\subsubsection{Load iPXE from GNU/GRUB}
+It's possible to generate a iPXE kernel file that can be loaded from GNU/GRUB. This file can be stored on the local hard-disk of the node.
+
+First of all, it's necessary to compile this kernel file (\texttt{ipxe.lkrn}) with the command:
+\begin{verbatim}
+  make bin/ipxe.lkrn
+\end{verbatim}
+
+Then you have to copy this file somewhere of the node's hard disk (let's say inside \texttt{/boot/ipxe.lkrn} witch is based on the partition number \texttt{\#P} of the disk number \texttt{\#D}.
+
+The last step is to write update the GNU/GRUB configuration file to make it load this kernel.
+
+\paragraph{Under GRUB legacy\\}
+
+The configuration file should look like:
+\begin{verbatim}
+  timeout 10
+  default 0
+  title iPXE
+    kernel (hd#D,#P)/boot/ipxe.lkrn
+\end{verbatim}
+
+Where \texttt{\#D} and \texttt{\#P} have to be replaced by the disk and partition number, for sample: \texttt{(hd0,1)}.
+
+If you want to add a custom iPXE script, just save a \emph{plain-text} file containing the script somewhere on the disk (let's say in the \texttt{/boot/bootscript.ipxe} file), then add the line \texttt{initrd /boot/bootscript.ipxe} after the \texttt{kernel} entry in the configuration file:
+\begin{verbatim}
+  timeout 10
+  default 0
+  title iPXE
+    kernel (hd#D,#P)/boot/ipxe.lkrn
+    initrd /boot/bootscript.ipxe
+\end{verbatim}
+
+\paragraph{Under GRUB 2\\}
+
+The configuration file should look like:
+\begin{verbatim}
+  menuentry iPXE {
+    set root=(hd#D,#P)
+    linux16 /boot/ipxe.lkrn
+  }
+\end{verbatim}
+
+Where \texttt{\#D} and \texttt{\#P} have to be replaced by the disk and partition number, for sample: \texttt{(hd0,1)}.
+
+If you want to add a custom iPXE script, just save a \emph{plain-text} file containing the script somewhere on the disk (let's say in the \texttt{/boot/bootscript.ipxe} file), then add the line \texttt{initrd /boot/bootscript.ipxe} after the \texttt{kernel} entry in the configuration file:
+\begin{verbatim}
+  menuentry iPXE {
+    set root=(hd#D,#P)
+    linux16 /boot/ipxe.lkrn
+    initrd /boot/bootscript.ipxe
+  }
+\end{verbatim}
+
+Further information are available on iPXE's website at \url{http://ipxe.org/embed}.
+
+
+\subsection{GRUB2 disk\label{sec:config:grub}}
+\textbf{Note:} In this part, we will only explain how to generate GRUB disks with GNU/GRUB version 2.
+
+The software is packaged on most of Linux distros in the package \emph{grub2}, you can also download the software at \url{http://www.gnu.org/software/grub/grub-download.html}.
+
+In recents version of GRUB 2, it's possible to generate GRUB NBPs with the \texttt{grub-mkimage} utility. To do so the disk image have to be generated with the format \texttt{i386-pc-pxe} which is available on GRUB version 1.99.
+
+The idea here is to generate a NBP GRUB disk image, let's say \texttt{grubpxe.0}. This file has to be loaded at boot time by the PXE-compatible NIC of nodes so it's necessary to configure the DHCP server to make this file be loaded at boot time (see section \ref{sec:dhcpconfig}).
+
+In order to be able to generate the disk image, GRUB 2 have to be installed on your machine (or at least, you should have compiled it).
+
+To generate the GRUB disk image, you'll have to use the command:
+\begin{verbatim}
+  grub-mkimage --format=i386-pc-pxe --output=grubpxe.0 \
+    --prefix='(pxe)' MODULES
+\end{verbatim}
+Where \texttt{MODULES} is a list of GRUB modules that you want to be embeded in the disk image. You can get a list of available modules in the GRUB modules directory (generally \texttt{/usr/lib/grub/} or \texttt{/boot/grub} depending on your system). At least you should include \texttt{pxe} (and \texttt{pxecmd} with GRUB 1.99).
+
+For sample, if you want your image to be able to boot a Linux OS that is installed on an EXT2 partition of an MS-DOS partitioned hard disk, you'll have to include the modules \texttt{biosdisk}, \texttt{part\_msdos}, \texttt{ext2} and \texttt{linux}.
+
+Here is a list of modules that will make your image able to boot most generic Operating Systems:
+\begin{multicols}{2}
+\begin{verbatim}
+  pxe
+  pxecmd   # GRUB 1.99 only
+  pxechain # GRUB 2.0 only
+  net # GRUB 2.0 only
+  tftp # GRUB 2.0 only
+  http # GRUB 2.0 only
+  biosdisk
+  boot
+  configfile
+  linux
+  bsd
+  lvm
+  multiboot
+  part_apple
+  part_bsd
+  part_gpt
+  part_msdos
+  part_sun
+  cpio
+  ext2
+  fat
+  hfs
+  hfsplus
+  iso9660
+  ntfs
+  reiserfs
+  tar
+  udf
+  ufs1
+  ufs2
+  xfs
+  zfs
+\end{verbatim}
+\end{multicols}
+
+If you want to embed a configuration script in your GRUB disk NBP (what will be pretty useful in the section \ref{sec:profiles}), you can generate it with the command:
+\begin{verbatim}
+  grub-mkimage --format=i386-pc-pxe --output=grubpxe.0 \
+    --prefix='(pxe)' --config=grub.cfg MODULES
+\end{verbatim}
+Where \texttt{grub.cfg} is a script containing GRUB 2 instructions.
+
+
+\section{Boot nodes following a node-specific profile\label{sec:profiles}}
+\subsection{PXElinux/GPXElinux (core feature)}
+
+The NBP first try to download the profile from the file \texttt{pxelinux.cfg/MAC\_ADDRESS} in the repository (\texttt{MAC\_ADDRESS} is in lower case with \texttt{-} as separating token and prefixed with the hardware type (ARP type code)). If this file does not exist, it will try to download the file \texttt{pxelinux.cfg/HEXA\_IP\_ADDRESS} where \texttt{HEXA\_IP\_ADDRESS} is an hexadecimal representation of the IP address of the node (alpha digits are in upper case). If this file is not present, it will try to download truncated version of this filename and the fallback on the \texttt{pxelinux.cfg/default} file.
+
+For example, if the MAC address of the node is \texttt{88:99:AA:BB:CC:DD} (with ARP type 1) and it's IP address is \texttt{192.0.2.91}, it will try to download profiles files in this specific order (unless one of this file exists in the repository):
+\begin{verbatim}
+  pxelinux.cfg/01-88-99-aa-bb-cc-dd
+  pxelinux.cfg/C000025B
+  pxelinux.cfg/C000025
+  pxelinux.cfg/C00002
+  pxelinux.cfg/C0000
+  pxelinux.cfg/C000
+  pxelinux.cfg/C00
+  pxelinux.cfg/C0
+  pxelinux.cfg/C
+  pxelinux.cfg/default
+\end{verbatim}
+
+It's also possible to custom the directory where the profiles are downloaded, the way the NBP download the profiles, etc... using some DHCP PXElinux-specific options:
+\begin{itemize}
+\item \texttt{Option 208} must be set to F1:00:74:7E for PXElinux to recognize any special DHCP options whatsoever.
+\item \texttt{Option 209} specifies the PXElinux configuration file name.
+\item \texttt{Option 210} specifies the PXElinux common path prefix, instead of deriving it from the boot file name.
+\item \texttt{Option 211} specifies, in seconds, the time to wait before reboot in the event of TFTP failure (0 means wait "forever")
+\end{itemize}
+
+For more information you can refer to the SYSLINUX wiki documentation at \url{http://www.syslinux.org/wiki/index.php/PXELINUX}.
+
+\subsection{iPXE (custom feature)}
+Booting the nodes following some instruction stored on a network-shared file is not a core feature of iPXE but there is a workaround to make it boot this way.
+
+The idea is to embed a script file in your iPXE NBP/ROM/Kernel (see section \ref{sec:config:ipxe} that will tell it to download a profile file from the network and boot the node following the instructions of this file.
+
+If you want the iPXE NBP/ROM/Kernel to download the script file (profile) from TFTP with a profile filename based on node's IP address, the embeded iPXE script should look like something like this:
+\begin{verbatim}
+  #!ipxe
+  dhcp
+  chain /ipxe.cfg/${net0/ip}
+\end{verbatim}
+In this case, if the DHCP server gives the address \texttt{10.0.1.2} to the node that is bootimg, the iPXE NBP/ROM/Kernel will make the node download the script file \texttt{/ipxe.cfg/10.0.1.2} on the TFTP server and execute it (the TFTP server's address is given by DHCP). The script file \texttt{/ipxe.cfg/10.0.1.2} should contain the iPXE instructions to make the node boot.
+
+Another example, if you want the iPXE NBP/ROM/Kernel to download the script file from HTTP with a profile filename based on node's MAC address, the embeded iPXE script should look like something like this:
+\begin{verbatim}
+  #!ipxe
+  dhcp
+  chain http://bootserver.lan/ipxe.cfg/${net0/mac}
+\end{verbatim}
+In this case, if the MAC address of the node's first NIC is \texttt{52:54:00:12:34}, the iPXE NBP/ROM/Kernel will make the node download the script file \texttt{/ipxe.cfg/52:54:00:12:34} on the HTTP server \texttt{bootserver.lan} and then execute it. If you want the filename to be formated as \texttt{52-54-00-12-34}, you can use \texttt{\$\{net0/mac:hexhyp\}} instead of \texttt{\$\{net0/mac\}}.
+
+Further information about the iPXE commands and the variables it exports are available at \url{http://ipxe.org/cmd} and \url{http://ipxe.org/cfg}.
+
+iPXE will also read different DHCP options (that you can customize in you DHCP server's configuration) that will change it's default behavior. This options are listed on iPXE web page at \url{http://ipxe.org/howto/dhcpd}.
+
+
+\subsection{GRUB2 disk (custom feature)}
+Booting the nodes following some instruction stored on a network-shared file is not a core feature of GRUB's NBP but there is a workaround to make it boot this way.
+
+The idea is to embed a configuration file in your GRUB disk (see section \ref{sec:config:grub} that will tell it to download a profile file from the network and boot the node following the instructions of this GRUB configuration file.
+
+If you want the GRUB disk to download the configuration file from TFTP with a profile filename based on node's IP address, the embeded configuration file should look like something like this:
+\begin{verbatim}
+  configfile (pxe)/grub.cfg/$net_pxe_ip
+\end{verbatim}
+In this case, if the DHCP server gives the address \texttt{10.0.1.2} to the node that is bootimg, the GRUB disk will make the node download the configuration file \texttt{/grub.cfg/10.0.1.2} on the TFTP server and execute it (the TFTP server's address is given by DHCP). The configuration file \texttt{/grub.cfg/10.0.1.2} should contain the GRUB instructions to make the node boot.
+
+Another example, if you want the GRUB disk to download the configuration file from HTTP with a profile filename based on node's MAC address, the embeded configuration file should look like something like this:
+\begin{verbatim}
+  configfile (http,bootserver.lan)/grub.cfg/$net_pxe_mac
+\end{verbatim}
+In this case, if the MAC address of the node's first NIC is \texttt{52:54:00:12:34}, the GRUB disk will make the node download the configuration file \texttt{/grub.cfg/52:54:00:12:34} with HTTP on the server \texttt{bootserver.lan} and then execute it (the DHCP server should be configured correctly if you want to use domain names, it's recommended to specify the HTTP server by IP address).
+
+
+The GRUB NBP will also read different DHCP options (that you can customize in you DHCP server's configuration) and export them in variables.
+\begin{itemize}
+  \item \texttt{Option 3}: \emph{Router}, you can get the list of them with the command \texttt{net\_ls\_route}
+  \item \texttt{Option 6}: \emph{Domain Name Server}, you can get the list of them with the command \texttt{net\_ls\_dns}
+  \item \texttt{Option 12}: \emph{Host name}, exported in the variable \texttt{\$net\_pxe\_hostname}
+  \item \texttt{Option 15}: \emph{Domain name}, exported in the variable \texttt{\$net\_pxe\_domain}
+  \item \texttt{Option 17}: \emph{Root Path}, exported in the variable \texttt{\$net\_pxe\_rootpath}
+  \item \texttt{Option 18}: \emph{Extensions Path}, exported in the variable \texttt{\$net\_pxe\_extensionspath}
+\end{itemize}
+
+Further information about DHCP options ant the variables exported by GRUB are available at \url{http://www.gnu.org/software/grub/manual/grub.html#Network}.
+
+
+\section{Download and boot Operating System kernel}
+In this section we will describe PXE profiles (PXElinux profile, iPXE script, GRUB disk's configuration file) that can be used to make nodes boot a Linux kernel downloaded from the network.
+
+In the following, we will try to boot the kernel \texttt{vmlinuz} and the initrd \texttt{initrd} that are stored in the directory \texttt{kernels/} of the TFTP, HTTP and FTP servers \texttt{bootserver.lan}. We will boot this kernel with the parameters \texttt{console=tty0 rw}.
+
+\subsection{PXElinux}
+\paragraph{Download from TFTP}
+\begin{verbatim}
+  DEFAULT networkboot
+  LABEL networkboot
+    KERNEL /kernels/vmlinuz
+    APPEND initrd=/kernels/initrd console=tty0 rw
+\end{verbatim}
+\hrulefill
+
+Further information are available at \url{http://www.syslinux.org/wiki/index.php/SYSLINUX}.
+
+\subsection{GPXElinux}
+\paragraph{Download from HTTP}
+\begin{verbatim}
+  DEFAULT networkboot
+  LABEL networkboot
+    KERNEL http://bootserver.lan/kernels/vmlinuz
+    APPEND initrd=http://bootserver.lan/kernels/initrd console=tty0 rw
+\end{verbatim}
+
+\paragraph{Download from FTP}
+\begin{verbatim}
+  DEFAULT networkboot
+  LABEL networkboot
+    KERNEL ftp://bootserver.lan/kernels/vmlinuz
+    APPEND initrd=ftp://bootserver.lan/kernels/initrd console=tty0 rw
+\end{verbatim}
+\hrulefill
+
+Further information are available at \url{http://www.syslinux.org/wiki/index.php/SYSLINUX}.
+
+\subsection{iPXE}
+\paragraph{Download from TFTP}
+\begin{verbatim}
+  #!ipxe
+  kernel /kernels/vmlinuz console=tty0 rw
+  initrd /bootserver.lan/kernels/initrd
+  boot
+\end{verbatim}
+
+\paragraph{Download from HTTP}
+\begin{verbatim}
+  #!ipxe
+  kernel http://bootserver.lan/kernels/vmlinuz console=tty0 rw
+  initrd http://bootserver.lan/bootserver.lan/kernels/initrd
+  boot
+\end{verbatim}
+
+\paragraph{Download from FTP}
+\begin{verbatim}
+  #!ipxe
+  kernel ftp://bootserver.lan/kernels/vmlinuz console=tty0 rw
+  initrd ftp://bootserver.lan/bootserver.lan/kernels/initrd
+  boot
+\end{verbatim}
+
+\textbf{Note:} To enable FTP support, you have to compile the iPXE NBP/ROM/Kernel with the \texttt{DOWNLOAD\_PROTO\_FTP} option (see \url{http://ipxe.org/err/3c092003}).
+
+\paragraph{Alternative method}
+\begin{verbatim}
+  #!ipxe
+  initrd http://bootserver.lan/bootserver.lan/kernels/initrd
+  chain http://bootserver.lan/kernels/vmlinuz console=tty0 rw
+\end{verbatim}
+\hrulefill
+
+Further information are available at \url{http://ipxe.org/scripting}.
+
+\subsection{GRUB2 disk}
+\paragraph{Download from TFTP}
+\begin{verbatim}
+  timeout=1
+  default=0
+  menuentry networkboot {
+    linux (pxe)/kernels/vmlinuz console=tty0 rw
+    initrd (pxe)/kernels/initrd
+  }
+\end{verbatim}
+
+\textbf{Note:} A bug with TFTP files download (see \url{http://savannah.gnu.org/bugs/?36795}) was intruced in revision 4505 fixed in the revision 4548, be careful of the version of GRUB you are using.
+
+\paragraph{Download from HTTP}
+\begin{verbatim}
+  timeout=1
+  default=0
+  menuentry networkboot {
+    linux (http,bootserver.lan)/kernels/vmlinuz console=tty0 rw
+    initrd (http,bootserver.lan)/kernels/initrd
+  }
+\end{verbatim}
+
+\textbf{Note:} Since sometimes GRUB is not able to resolv domain names correctly (depending on your DHCP server's configuration) it's recommended to use the IP address of the HTTP server.
+
+\paragraph{Alternative method}
+\begin{verbatim}
+  timeout=1
+  default=0
+  menuentry networkboot {
+    set root=(http,bootserver.lan)
+    linux /kernels/vmlinuz console=tty0 rw
+    initrd /kernels/initrd
+  }
+\end{verbatim}
+\hrulefill
+
+Further information are available at \url{http://www.gnu.org/software/grub/manual/grub.html}.
+
+
+\section{Boot local Operating System (from hard disk)}
+In this section we will describe PXE profiles (PXElinux profile, iPXE script, GRUB disk's configuration file) that can be used to make nodes boot an Operating System that is installed on hard disk.
+
+In this sample, we will boot a Linux system that is installed on the third partition of the first hard disk. The kernel and initrd of the system are respectively located at \texttt{/boot/vmlinuz} and \texttt{/boot/initrd} in the EXT2 partition. We will boot the kernel with the options \texttt{console=tty0 rw}.
+
+\subsection{chain.c32 COMBOOT}
+Since PXElinux/GPXElinux and iPXE do not know filesystems (EXT3, FAT, ...) it's not possible to load and boot a kernel from the local hard disk of a node with this methods.
+
+However it's possible to use a COMBOOT that will relay the boot procedure to a bootloader that is installed on the partition that we want to boot.
+
+The COMBOOT \texttt{chain.c32} that is provided in the \emph{syslinux} package/sources (see section \ref{sec:config:pxelinux}) can be used to perform such kind of operation.
+
+In the following we will see how to make \texttt{chain.c32} chain on the bootloader (such as GRUB) that is installed on the third partition of the first disk with different NBPs. The COMBOOT have to be present in the PXE repository (TFTP/HTTP).
+
+\subsubsection{PXElinux/GPXElinux}
+\begin{verbatim}
+  DEFAULT localboot
+  LABEL localboot
+    KERNEL /chain.c32
+    APPEND hd0 3
+\end{verbatim}
+
+\subsubsection{iPXE}
+\begin{verbatim}
+  #!ipxe
+  chain /chain.c32 hd0 3
+\end{verbatim}
+\hrulefill
+
+Further information about the \texttt{chain.c32} COMBOOT are available on the \emph{syslinux} wiki at \url{http://www.syslinux.org/wiki/index.php/Comboot/chain.c32}.
+
+
+\subsection{GRUB2 disk}
+First of all, in order to be able to boot a kernel that is installed on an EXT2 partition of an MS-DOS partitioned disk, the GRUB disk have to include the modules \texttt{biosdisk}, \texttt{part\_msdos}, \texttt{ext2} and \texttt{linux} (see section \ref{sec:config:grub}).
+
+The profile then look like:
+\begin{verbatim}
+  timeout=1
+  default=0
+  menuentry localboot {
+    set root=(hd0,3)
+    linux /boot/vmlinuz console=tty0 rw
+    initrd /boot/initrd
+  }
+\end{verbatim}
+
+Depending on the modules you included in your GRUB disk, it can boot every system GRUB2 knows how to boot.
+
+Another sample where we will ask to GRUB to chain on the bootloader that is installed on the partition (the same feature the \texttt{chain.c32} COMBOOT is providing):
+\begin{verbatim}
+  timeout=1
+  default=0
+  menuentry localboot {
+    set root=(hd0,3)
+    chainloader +1
+  }
+\end{verbatim}
+\hrulefill
+
+Further information about GRUB's boot methods are available at \url{http://www.gnu.org/software/grub/manual/grub.html#Booting}.
+
+
+\section{Chaining NBPs}
+Sometimes you may not want (or do not have the possibility) to change the NBP that is loaded by nodes depending on the DHCP server's configuration.
+
+The idea in this section is to explain how NBP's can chainload each other in order to use a specific NBP regardless to the DHCP server's configuration (at least it should be configured to boot the nodes with one of the methods listed bellow).
+
+For example, if your DHCP server is configured to make the nodes boot with PXElinux but you want them to boot with iPXE or a GRUB disk without having to modify the DHCP server configuration, you can make PXElinux load (or chainload) one of this other NBP.
+
+In the following, \texttt{pxelinux.0} is a PXElinux NBP, \texttt{grubpxe.0} a GRUB NBP, \texttt{undionly.kpxe} an iPXE NBP and \texttt{ipxe.lkrn} an iPXE kernel file.
+
+\subsection{From PXElinux to GRUB2 disk}
+\begin{verbatim}
+  DEFAULT pxechain
+  LABEL pxechain
+    PXE /grubpxe.0
+\end{verbatim}
+
+\subsection{From PXElinux to iPXE}
+\begin{verbatim}
+  DEFAULT pxechain
+  LABEL pxechain
+    PXE /undionly.kpxe
+\end{verbatim}
+
+\subsection{From iPXE to PXElinux}
+\begin{verbatim}
+  #!ipxe
+  chain /pxelinux.0
+\end{verbatim}
+
+\subsection{From iPXE to GRUB2 disk}
+\begin{verbatim}
+  #!ipxe
+  chain /grubpxe.0
+\end{verbatim}
+
+\subsection{From GRUB2 disk to PXElinux}
+\begin{verbatim}
+  pxechainloader (pxe)/pxelinux.0
+  boot
+\end{verbatim}
+
+\textbf{Note:} This feature contains a bug, the PXElinux NBP will be loaded but won't work, please refer to \url{http://lists.gnu.org/archive/html/grub-devel/2010-09/msg00049.html}.
+
+\subsection{From GRUB2 disk to iPXE}
+\paragraph{iPXE NBP}
+\begin{verbatim}
+  pxechainloader (pxe)/undionly.kpxe
+  boot
+\end{verbatim}
+
+\textbf{Note:} This feature contains a bug, the iPXE NBP will be loaded but won't work, please refer to \url{http://lists.gnu.org/archive/html/grub-devel/2010-09/msg00049.html}.
+
+\paragraph{iPXE Kernel}
+\begin{verbatim}
+  timeout=1
+  default=0
+  menuentry pxechain {
+    set root=(pxe)
+    linux16 /ipxe.lkrn
+    initrd /bootscript.ipxe
+  }
+\end{verbatim}
+
+Where \texttt{bootscript.ipxe} is an \emph{plain-text} file containing an iPXE script that will be run by the iPXE kernel.
+
+\end{document}
