@@ -1,0 +1,197 @@
+operation 'Reboot operations' do
+  resource :POST, '/reboot', 'Launch a reboot operation' do
+    request do
+      parameter '_generic_parameter_', :'...', "Some workflow-based operation\'s generic parameter (see more #{$cgi.a(:href => '#workflow_operations'){'here'}})", false
+      parameter :nodes, :Array, 'The list of nodes the operation should be applied on'
+      parameter :client, :String, "The client used to export files to the server, useful for local:// files (see more #{$cgi.a(:href => '#file_export'){'here'}})", false
+      parameter :ssh_authorized_keys, :String, "The path to a ssh authorized_keys file that have to be copied in the root directory of the deployed environment (see more #{$cgi.a(:href => '#file_export'){'here'}})", false
+      parameter :vlan, :String, 'Specify the VLAN the nodes should be reboot in', false
+      parameter :pxe, :Hash, 'Specify some custom netboot parameters. This field is mandatory when using the kind "set_pxe".', false do
+        parameter :pxe, :String, 'A custom PXE profile, the string FILES_PREFIX-- will be replaced by the prefix to some exported files', false
+        parameter :files, :Array, "A list of path to files that have to be exported in the PXE repository\'s directory (see more #{$cgi.a(:href => '#file_export'){'here'}})", false
+        parameter :singularities, :Hash, 'Specify a substitution pattern for each node in the PXE profile (the NODE_SINGULARITY pattern must be used in the PXE profile)',false do
+            parameter 'nodename', :String, 'The substitution pattern for the node "nodename"', false
+        end
+      end
+      parameter :block_device, :String, 'The block device the environment has been installed on', false
+      parameter :deploy_partition, :Integer, 'The partition the environment has been installed on', false
+      parameter :environment, :Hash, 'The environment that has been deployed. This field is mandatory when using the kind "recorded_env".',false do
+        parameter :name, :String, 'The name of the environment'
+        parameter :version, :String, 'The version of the environment', false
+        parameter :user, :String, 'The owner of the environment', false
+      end
+      parameter :timeout_reboot_classical, :Integer, 'Overwrite the default value for the reboot timeout', false
+      parameter :kind, :String, 'The kind of reboot to be performed', true, :expected => ['set_pxe','simple','deploy_env','recorded_env']
+      parameter :level, :String, 'The level of the command that will be performed', false, :expected => ['soft','hard','very_hard'], :default => 'soft'
+      parameter :check_destructive, :Set, 'Check if the last deployed environment has the destructive flag, if it does, do not perform the reboot operation', false
+    end
+    response do
+      field '', 'Workflow', 'Information related to the workflow of the reboot operation'
+    end
+
+    example 'Perform a simple hard reboot on nodes (do not re-write the PXE profile)',
+    <<-EOS ,
+      POST /reboot HTTP/1.1
+      Accept: text/plain, application/json
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      Content-Type: application/json
+      Content-Length: 112
+      {
+        "nodes": [
+          "node-1.testbed.lan",
+          "node-2.testbed.lan"
+        ],
+        "kind": "simple",
+        "level": "hard"
+      }
+    EOS
+    <<-EOS
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+      Content-Length: 533
+      {
+        "wid": "R-27714bc3-860d-40e7-8371-b7419f6c9021",
+        "resources": {
+          "resource": "/reboot/R-27714bc3-860d-40e7-8371-b7419f6c9021",
+          "log": "/reboot/R-27714bc3-860d-40e7-8371-b7419f6c9021/logs",
+          "logs": {
+            "graphene-cluster": "/reboot/R-27714bc3-860d-40e7-8371-b7419f6c9021/logs/graphene-cluster"
+          },
+          "state": "/reboot/R-27714bc3-860d-40e7-8371-b7419f6c9021/state",
+          "status": "/reboot/R-27714bc3-860d-40e7-8371-b7419f6c9021/status",
+          "error": "/reboot/R-27714bc3-860d-40e7-8371-b7419f6c9021/error"
+        }
+      }
+    EOS
+
+    example 'Reboot nodes on the deployment environment and send the user\'s SSH authorized_keys file',
+    <<-EOS ,
+      POST /reboot HTTP/1.1
+      Accept: text/plain, application/json
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      Content-Type: application/json
+      Content-Length: 229
+      {
+        "nodes": [
+          "node-1.testbed.lan",
+          "node-2.testbed.lan"
+        ],
+        "kind": "deploy_env",
+        "level": "soft",
+        "ssh_authorized_keys": "/home/frontend/.ssh/authorized_keys",
+        "client": "http://frontend.testbed.lan:12345"
+      }
+    EOS
+    <<-EOS
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+      Content-Length: 533
+      {
+        "wid": "R-52269f0e-1a5b-4f23-8cbf-0f17b166c420",
+        "resources": {
+          "resource": "/reboot/R-52269f0e-1a5b-4f23-8cbf-0f17b166c420",
+          "log": "/reboot/R-52269f0e-1a5b-4f23-8cbf-0f17b166c420/logs",
+          "logs": {
+            "graphene-cluster": "/reboot/R-52269f0e-1a5b-4f23-8cbf-0f17b166c420/logs/graphene-cluster"
+          },
+          "state": "/reboot/R-52269f0e-1a5b-4f23-8cbf-0f17b166c420/state",
+          "status": "/reboot/R-52269f0e-1a5b-4f23-8cbf-0f17b166c420/status",
+          "error": "/reboot/R-52269f0e-1a5b-4f23-8cbf-0f17b166c420/error"
+        }
+      }
+    EOS
+
+    example 'Reboot nodes on a (previously installed) recorded environment and check if the partition table was destroyed',
+    <<-EOS ,
+      POST /reboot HTTP/1.1
+      Accept: text/plain, application/json
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      Content-Type: application/json
+      Content-Length: 311
+      {
+        "nodes": [
+          "node-1.testbed.lan",
+          "node-2.testbed.lan"
+        ],
+        "kind": "recorded_env",
+        "level": "soft",
+        "deploy_partition": "3",
+        "check_destructive": true,
+        "environment": {
+          "user": "root",
+          "name": "debian-base",
+          "version": 1
+        },
+        "client": "http://frontend.testbed.lan:12345"
+      }
+    EOS
+    <<-EOS
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+      Content-Length: 533
+      {
+        "wid": "R-7b52716a-2b72-4c66-b725-dc9f1726d0a6",
+        "resources": {
+          "resource": "/reboot/R-7b52716a-2b72-4c66-b725-dc9f1726d0a6",
+          "log": "/reboot/R-7b52716a-2b72-4c66-b725-dc9f1726d0a6/logs",
+          "logs": {
+            "graphene-cluster": "/reboot/R-7b52716a-2b72-4c66-b725-dc9f1726d0a6/logs/graphene-cluster"
+          },
+          "state": "/reboot/R-7b52716a-2b72-4c66-b725-dc9f1726d0a6/state",
+          "status": "/reboot/R-7b52716a-2b72-4c66-b725-dc9f1726d0a6/status",
+          "error": "/reboot/R-7b52716a-2b72-4c66-b725-dc9f1726d0a6/error"
+        }
+      }
+    EOS
+
+    example 'Reboot nodes on a specified kernel using a custom PXE profile with some nodes singularities',
+    <<-EOS ,
+      POST /reboot HTTP/1.1
+      Accept: text/plain, application/json
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      Content-Type: application/json
+      Content-Length: 613
+      {
+        "nodes": [
+          "node-1.testbed.lan",
+          "node-2.testbed.lan"
+        ],
+        "kind": "set_pxe",
+        "pxe": {
+          "profile": "PROMPT 1\nSERIAL 0 19200\nDEFAULT bootlabel\nDISPLAY messages\nTIMEOUT 50\n\nlabel bootlabel\n\tKERNEL FILES_PREFIX--myvmlinuz\n\tAPPEND initrd=FILES_PREFIX--myinitrd console=tty0 console=ttyS0,19200n8 ramdisk_size=290000 id=NODE_SINGULARITY rw noapic\n",
+          "singularities": {
+            "node-1.testbed.lan": "1",
+            "node-2.testbed.lan": "2"
+          },
+          "files": [
+            "/home/frontend/myvmlinuz",
+            "/home/frontend/myinitrd"
+          ]
+        },
+        "client": "http://frontend.testbed.lan:12345"
+      }
+    EOS
+    <<-EOS
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+      Content-Length: 533
+      {
+        "wid": "R-759f3f78-9742-47e6-b67e-c12b6750c2e4",
+        "resources": {
+          "resource": "/reboot/R-759f3f78-9742-47e6-b67e-c12b6750c2e4",
+          "log": "/reboot/R-759f3f78-9742-47e6-b67e-c12b6750c2e4/logs",
+          "logs": {
+            "graphene-cluster": "/reboot/R-759f3f78-9742-47e6-b67e-c12b6750c2e4/logs/graphene-cluster"
+          },
+          "state": "/reboot/R-759f3f78-9742-47e6-b67e-c12b6750c2e4/state",
+          "status": "/reboot/R-759f3f78-9742-47e6-b67e-c12b6750c2e4/status",
+          "error": "/reboot/R-759f3f78-9742-47e6-b67e-c12b6750c2e4/error"
+        }
+      }
+    EOS
+  end
+end

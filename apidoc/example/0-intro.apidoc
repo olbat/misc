@@ -1,0 +1,427 @@
+introduction do
+  section "Request's parameters", 'request_parameters' do
+	  paragraph "There is several ways to specify parameters when using the network API. Parameters can be specified in the query's URI parameter but also in the query's body. Remark: it's only possible to use String and Array data structures when specifying parameters using the query's URI to specify more advanced parameters (Numbers, Hashs, ...) it's necessary to specify the parameters using a more advanced description language (JSON/YAML) in the query's body."
+    paragraph "The following examples are equivalent:"
+    paragraph $cgi.b{"Specifying parameters in the query's URI"}
+    paragraph html_code <<-EOS
+      POST /deploy?nodes=node-1.testbed.lan&nodes=node-2.testbed.lan HTTP/1.1
+      Accept: */*
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+    EOS
+
+    paragraph $cgi.b{"Specifying parameters in the query's body"}
+    paragraph $cgi.tt{"JSON body"}
+    paragraph html_code <<-EOS
+      POST /deploy HTTP/1.1
+      Accept: */*
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      Content-Type: application/json
+      Content-Length: 73
+      {
+        "nodes": [
+          "node-1.testbed.lan",
+          "node-2.testbed.lan"
+        ]
+      }
+    EOS
+
+    paragraph $cgi.tt{"YAML body"}
+    paragraph html_code <<-EOS
+      POST /deploy HTTP/1.1
+      Accept: */*
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      Content-Type: application/x-yaml
+      Content-Length: 47
+      ---
+      nodes:
+      - node-1.testbed.lan
+      - node-2.testbed.lan
+    EOS
+  end
+
+  section "Output type and encoding", 'output_type' do
+    paragraph "The Kadeploy server can respond to a request in different formats: JSON and YAML, with or without compression (gzip only)."
+    paragraph "The response format depends on the value of the 'Accept' HTTP header of the request. By default (if it's set to */*) the response will be formated in JSON otherwise it will use the specified format."
+    paragraph "The response encoding (compression) depends on the value of the 'Accept-Encoding' HTTP header. By default (if it's not set or set to */*) the response will not be compressed, otherwise it will be compressed using the gzip algorithm."
+
+    paragraph "Here are some examples:"
+    paragraph $cgi.b{"JSON response"}
+    paragraph html_code <<-EOS
+      GET /nodes HTTP/1.1
+      Accept: application/json
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+    EOS
+    paragraph html_code <<-EOS
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+      Content-Length: 50
+      [
+        "node-1.testbed.lan",
+        "node-2.testbed.lan"
+      ]
+    EOS
+
+    paragraph $cgi.b{"YAML response"}
+    paragraph html_code <<-EOS
+      GET /nodes HTTP/1.1
+      Accept: application/x-yaml
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+    EOS
+    paragraph html_code <<-EOS
+      HTTP/1.1 200 OK
+      Content-Type: application/x-yaml
+      Content-Length: 47
+      ---
+      - node-1.testbed.lan
+      - node-2.testbed.lan
+    EOS
+
+    paragraph $cgi.b{"Compressed JSON response"}
+    paragraph html_code <<-EOS
+      GET /nodes HTTP/1.1
+      Accept: application/x-yaml
+      Accept-Encoding: gzip
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+    EOS
+    paragraph html_code <<-EOS
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+      Content-Encoding: gzip
+      Content-Length: 52
+      ...BINARY_DATA...
+    EOS
+  end
+
+  section "Global parameters" do
+    paragraph "Some parameters are mendatory, they have to be precised in each request as parameter. Here is a list of them: #{['user'].collect{|v|$cgi.i{v}}.join(', ')}."
+  end
+
+  section 'Authentication' do
+    paragraph "To access API resources an authentication is needed. There is four different methods to authenticate when accessing a ressource. Depending on the server's configuration it will be possible to use -at least- one of this methods."
+    paragraph "Authentication parameters are given in the HTTP headers of the request. A prefix can be set to this parameters, this prefix default to 'X-Kadeploy' but it can be set to another value (see #{$cgi.a(:href=>'#GET/auth_headers_prefix'){'GET /auth_headers_prefix'}})."
+
+    paragraph $cgi.b{'Authentication using the IDENT protocol'}
+    paragraph "The first authentication method is based on the IDENT protocol. When a request will be received on the server, it will first check if the request is coming from a trusted machine then it will contact the IDENT server of this machine in order to be sure that the username specified in the 'User' request's header is actually corresponding to the user on the machine that initiated the request. The 'User' request's header is not mandatory. In order to be authenticated with this method, no extra parameters have to be providen, an IDENT server just have to be set up on the machine that is used to initiate the request. Here is an example:"
+    paragraph html_code <<-EOS
+      GET /nodes HTTP/1.1
+      Accept: */*
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+    EOS
+
+    paragraph $cgi.b{'Authentication by password'}
+    paragraph "The second authentication method is the authentication by password (from trusted machines) using the HTTP Basic Authentication method (RFC 2617). In order to authenticate with such a method it's necessary to specify the user and password as a base64 string in the 'Authorization' request's header. Here is some examples:"
+    paragraph html_code <<-EOS
+      GET /nodes HTTP/1.1
+      Accept: */*
+      Host: kadeploy.testbed.lan:25300
+      Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==
+    EOS
+    paragraph $cgi.b{'Authentication by certificate'}
+    paragraph "To be able to authenticate using a (x509) certificate it's necessary to provide a base64 encoded x509 certificate that was signed with the trusted CA private key in the 'Certificate' request's header. The username must appear in the certificate's subject CN field. The 'User' request's header is not mandatory. Here is an example:"
+    paragraph html_code <<-EOS
+      GET /nodes HTTP/1.1
+      Accept: */*
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      X-Kadeploy-Certificate: MIIEIzCCAwugAwIBAgIBGTANBgkqhkiG9w0BAQUFADBiMQswCQYDVQQ...XnMuLyV1FQ==
+    EOS
+    paragraph $cgi.b{'Authentication by ACL'}
+    paragraph "If your machine's hostname is in the server's Access Control List, it will be trust without any further verifications. Here is an example:"
+    paragraph html_code <<-EOS
+      GET /nodes HTTP/1.1
+      Accept: */*
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+    EOS
+  end
+
+  section 'Errors management' do
+    paragraph "Two kind of errors will be returned by the service: classical HTTP errors (Unauthorized, Forbidden, Not Found, ...) and Kadeploy specific errors."
+
+    paragraph "Classical HTTP errors will be return fitting with the HTTP 1.1 standards, an error message will be add in the body of the response."
+
+    paragraph "Kadeploy errors will be returned using the HTTP return code 400 (Bad Request) plus some (non-standard) HTTP header: X-Application-Error-Code and X-Application-Error-Info. The header X-Application-Error-Code will contain a Kadeploy specific error code while the header X-Application-Error-Info contains a (Base64 encoded) error message. The Kadeploy specific error codes are described in the following."
+    paragraph "Here is an example of a Kadeploy specific error response:" 
+    paragraph html_code <<-EOS
+      HTTP/1.1 400 Bad Request
+      X-Application-Error-Code: 6
+      X-Application-Error-Info: WW91IGRvIG5vdCBoYXZlIHN1ZmZpY2llbnQgcmlnaHRzIHRvIHBlcmZvcm0gdGhlIG9wZXJhdGlvbiBvbiBhbGwgdGhlIG5vZGVz
+      Content-Type: text/plain
+      Content-Length: 75
+      You do not have sufficient rights to perform the operation on all the nodes
+    EOS
+
+    paragraph $cgi.b{'Kadeploy error codes'}
+    list=[]
+    list << ["1", 'INVALID_WORKFLOW_ID', "Invalid workflow ID"]
+    list << ["2", 'INVALID_NODELIST', "Invalid node list"]
+    list << ["3", 'INVALID_CLIENT', "Invalid client's export"]
+    list << ["4", 'INVALID_OPTION', "Invalid option in the request"]
+    list << ["5", 'INVALID_FILE', "Invalid file"]
+    list << ["6", 'INVALID_RIGHTS', "You do not have sufficient rights to perform the operation on all the nodes"]
+    list << ["7", 'INVALID_ENVIRONMENT', "Invalid environment specification"]
+    list << ["8", 'INVALID_CUSTOMOP', "Invalid custom operations specification"]
+    list << ["9", 'INVALID_VLAN', "Invalid VLAN"]
+    list << ["10", 'EXISTING_ELEMENT', "Element already exists"]
+    list << ["11", 'CONFLICTING_ELEMENTS', "Some elements already exists and are conflicting"]
+    list << ["12", 'MISSING_OPTION', "Some options are missing"]
+    list << ["13", 'CONFLICTING_OPTIONS', "Some options are conflicting"]
+    list << ["14", 'NOTHING_MODIFIED', "No element has been modified"]
+    list << ["15", 'EXECUTE_ERROR', "The execution of a command failed"]
+    list << ["20", 'DATABASE_ERROR', "Database issue"]
+    list << ["21", 'CACHE_ERROR', "Something went wront with the cache system"]
+    list << ["22", 'CACHE_FULL', "The cache is full"]
+    list << ["30", 'DESTRUCTIVE_ENVIRONMENT', "Cannot reboot since the last deployed environment was destructive"]
+    list.collect!{|v|$cgi.tr{"#{$cgi.td{v[0]}}#{$cgi.td{v[1]}}#{$cgi.td{v[2]}}"}}
+    paragraph $cgi.table(:style => 'margin-left: 40px;'){$cgi.tr{"#{$cgi.th{'Error #'}}#{$cgi.th{'Name'}}#{$cgi.th{'Description'}}"}+list.join}
+  end
+  section 'Workflow based operations', 'workflow_operations' do
+    paragraph 'Since some operations take time to be executed and can\'t directly return a result, we implemented a common asynchronious workflow.'
+    paragraph 'The idea here will be to:'
+    paragraph $cgi.ul{
+      $cgi.li{"(1) Initialize the operation (see #{$cgi.a(:href=>'#POST/%OPERATION'){'POST /%OPERATION'}});"} +
+      $cgi.li{"(2) Do some polling to know if the operation is done (see #{$cgi.a(:href=>'#GET/%OPERATION/:id'){'GET /%OPERATION/:id'}});"} +
+      $cgi.li{"(3) Gather operation\'s logs when soma are marked as available (see #{$cgi.a(:href=>'#GET/%OPERATION/:id/logs/:cluster?'){'GET /%OPERATION/:id/logs/:cluster?'}});"} +
+      $cgi.li{"(4) When the operation is marked as done, delete workflow informations from the server (see #{$cgi.a(:href=>'#DELETE/%OPERATION/:id'){'DELETE /%OPERATION/:id'}});"} +
+      $cgi.li{"(!!) If the error state is set at true during the process, gather the error message and delete workflow information (see #{$cgi.a(:href=>'#GET/%OPERATION/:id/error'){'GET /%OPERATION/:id/error'}});"}
+    }
+    paragraph "#{$cgi.a(:href=>'#Deployment'){'Deployment'}}, #{$cgi.a(:href=>'#Reboot operations'){'Reboot'}} and #{$cgi.a(:href=>'#Power operations'){'Power'}} operations are workflow-based. For more information please take a look at the section #{$cgi.a(:href=>'#Workflow-based operations'){'Workflow-based operations'}}."
+  end
+  section 'Exporting files for the server','file_export' do
+    paragraph 'Files can be specified to the server using different methods. To change the method, you have to use specific protocols in the URI of the file.'
+    paragraph 'Here are the supported protocols:'
+    paragraph $cgi.b{'http://'}
+    paragraph 'The file is hosted at the following HTTP url'
+    paragraph $cgi.b{'local://'}+' or '+$cgi.b{'nothing'}
+    paragraph "The file is hosted on a dynamic location, the parameter #{$cgi.tt{'client'}} will be used to specify where is the file hosted."
+    paragraph "The server will try to download the file at #{$cgi.tt{'[client]/Base64(filename)'}}."
+    paragraph "For sample, if the specified file is #{$cgi.tt{'file:///home/frontend/file'}} and #{$cgi.tt{'client'}} is set to #{$cgi.tt{'http://frontend.testbed.lan:12345'}}, the server will try to download the file #{$cgi.tt{'http://frontend.testbed.lan:12345/L2hvbWUvZnJvbnRlbmQvZmlsZQo='}}."
+    paragraph $cgi.b{'server://'}
+    paragraph 'The file is hosted on the Kadeploy server'
+    paragraph 'Samples:'
+
+    paragraph $cgi.b{'HTTP hosted file'}
+    paragraph html_code <<-EOS
+      POST /environments HTTP/1.1
+      Accept: text/plain, application/json
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      Content-Type: application/json
+      Content-Length: 301
+      {
+        "environment": {
+          "name": "debian-base",
+          ...
+          "image": {
+            "file": "http://testbed.lan/debian-base.tgz",
+            "kind": "tar",
+            "compression": "gzip"
+          },
+          ...
+        }
+      }
+    EOS
+    paragraph $cgi.b{'Localy hosted files'}
+    paragraph html_code <<-EOS
+      POST /environments HTTP/1.1
+      Accept: text/plain, application/json
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      Content-Type: application/json
+      Content-Length: 731
+      {
+        "client": "http://frontend.testbed.lan:12345",
+        "environment": {
+          "name": "debian-base",
+          ...
+          "image": {
+            "file": "/home/frontend/debian-base.tgz",
+            "kind": "tar",
+            "compression": "gzip"
+          },
+          "postinstalls": [
+            {
+              "archive": "/home/frontend/debian-base-postinstall.tgz",
+              "compression": "gzip",
+              "script": "traitement.ash /rambin"
+            }
+          ],
+          ...
+        }
+      }
+    EOS
+
+    paragraph $cgi.b{'Server hosted files'}
+    paragraph html_code <<-EOS
+      POST /environments HTTP/1.1
+      Accept: text/plain, application/json
+      Host: kadeploy.testbed.lan:25300
+      X-Kadeploy-User: frontend
+      Content-Type: application/json
+      Content-Length: 657
+      {
+        "environment": {
+          "name": "debian-base",
+          ...
+          "image": {
+            "file": "server:///tmp/debian-base.fsa",
+            "kind": "fsa",
+            "compression": 3
+          },
+          ...
+        }
+      }
+    EOS
+  end
+
+  section "API documentation notations" do
+    paragraph 'When using the Network API, the data structures used to describe resources can be complex (Array, Hash, nested structured, ...), that\'s why we decided to use a specific formalism to describe them.'
+
+    paragraph $cgi.b{'Body\'s type of the request/response'}
+    paragraph 'First of all, the type of the main structure is describe in the title, for sample:'
+    paragraph $cgi.h3(:class=>'request_title',:style=>'margin-left: 50px;'){"Request/Response/Type"+$cgi.span(:class=>'request_title_desc'){"("+$cgi.span(:class=>'request_type'){'Hash'}+")"}}
+    paragraph "Means that the request\'s body have to be a Hash, formated used one of the allowed Content-Type (see #{$cgi.a(:href=>'#request_parameters'){'Request\'s parameters'}} and #{$cgi.a(:href=>'#output_type'){'Output type and encoding'}})"
+
+    paragraph $cgi.b{'Hash'}
+    paragraph "Here is an example of the description of a simple Hash and some basic elements, the #{$cgi.tt{'{}'}} chars are used to specify that \"myhash\" has the type Hash."
+
+    t = Type.new(:Example,:Hash,'An example')
+    f = t.field(:myhash, :Hash, 'The sample Hash')
+    t.field(:user, :String, 'The username',nil,f)
+    t.field(:size, :Integer, 'The size',nil,f)
+    t.field(:option, :Boolean, 'Enable/Disable "option"',nil,f)
+    t.field(:setting, :Set, 'If this field is set, no mather it\'s value, the option "setting" is enabled',nil,f)
+    paragraph $cgi.div(:style=>'margin-left: 50px'){t.to_html($cgi)}
+    paragraph 'An HTTP request\'s sample:'
+    paragraph $cgi.div(:style=>'margin-left: 50px'){html_code <<-EOS
+      POST /sample HTTP/1.1
+      Accept: text/plain, application/json
+      Content-Type: application/json
+      Content-Length: 81
+      {
+        "myhash": {
+          "size": 42,
+          "option": true,
+          "setting": null
+        }
+      }
+    EOS
+    }
+
+    paragraph $cgi.b{'Arrays'}
+    paragraph "Here is an example of the description of a simple Array, the #{$cgi.tt{'[]'}} chars are used to specify that \"myarray\" has the type Array, the char #{$cgi.tt{'#'}} specify that the element that is described is the result of an iteration on the Array."
+    t = Type.new(:Example,:Hash,'An example')
+    f = t.field(:myarray, :Array, 'The sample Array')
+    t.field('#i', :String, 'The element #i',nil,f)
+    paragraph $cgi.div(:style=>'margin-left: 50px'){t.to_html($cgi)}
+    paragraph 'An HTTP request\'s sample:'
+    paragraph $cgi.div(:style=>'margin-left: 50px'){html_code <<-EOS
+      POST /sample HTTP/1.1
+      Accept: text/plain, application/json
+      Content-Type: application/json
+      Content-Length: 54
+      {
+        "myarray": [
+          "abc",
+          "def",
+          "ghi"
+        ]
+      }
+    EOS
+    }
+
+    paragraph $cgi.b{'Dynamic Hash key names'}
+    paragraph "Hash table\'s keys do not always have a static name, in some cases, the key name can be dynamic. In this case, the key name will be #{$cgi.span(:class=>'element_dynamic'){'underlined'}} this way. Here is an example:"
+    t = Type.new(:Example,:Hash,'An example')
+    f = t.field(:myhash, :Hash, 'The sample Hash')
+    t.field('nodename', :Integer, 'Returns the uptime of the node "nodename"',nil,f)
+    paragraph $cgi.div(:style=>'margin-left: 50px'){t.to_html($cgi)}
+    paragraph 'An HTTP request\'s sample:'
+    paragraph $cgi.div(:style=>'margin-left: 50px'){html_code <<-EOS
+      POST /sample HTTP/1.1
+      Accept: text/plain, application/json
+      Content-Type: application/json
+      Content-Length: 83
+      {
+        "myhash": {
+          "node-1": 12345,
+          "node-2": 45678,
+          "node-3": 90123
+        }
+      }
+    EOS
+    }
+
+    paragraph $cgi.b{'URI path parameters'}
+    paragraph "Some parameters can be specified in the URI, in the documentation, this parameters will be #{$cgi.span(:class=>'element_param'){'underlined'}}."
+    paragraph "In the URI, dynamic parameters will be prefixed with a #{$cgi.tt{':'}} such as #{$cgi.tt{':name'}}; if the parameter is suffixed with a #{$cgi.tt{'?'}}, this parameter is optional, for sample #{$cgi.tt{':version?'}}. Here is an example :"
+    paragraph $cgi.span(:class => 'resource_path'){''}
+    t = Type.new(:'GET /sample/:name/:version?',:' ','An example')
+    t.field(:user, :String, 'The user')
+    t.field(':name', :String, 'The name')
+    t.field(':version', :String, 'The version')
+    paragraph $cgi.div(:style=>'margin-left: 50px'){t.to_html($cgi)}
+    paragraph 'An HTTP request\'s sample:'
+    paragraph $cgi.div(:style=>'margin-left: 50px'){html_code <<-EOS
+      GET /sample/thename/ HTTP/1.1
+      Accept: text/plain, application/json
+    EOS
+    }
+
+    paragraph $cgi.b{'Nested structured'}
+    paragraph 'Structures can then be nested in different ways:'
+    t = Type.new(:Example,:Hash,'An example')
+    f = t.field(:myhash, :Hash, 'The sample Hash')
+    t.field(':version', :String, 'The version')
+    f1 = t.field(:anotherhash, :Hash, 'The first hash',nil,f)
+    f2 = t.field('nodename', :Hash, 'Description of the node "nodename"',nil,f1)
+    t.field(:user, :String, 'The username',nil,f2)
+    t.field(:option, :Boolean, 'Enable/Disable "option"',nil,f2)
+    f3 = t.field(:myarray, :Array, 'The first array',nil,f)
+    f4 = t.field("#i", :Hash, 'The element #i',nil,f3)
+    t.field(:size, :Integer, 'The size',nil,f4)
+    t.field(:setting, :Set, 'If this field is set, no mather it\'s value, the option "setting" is enabled',nil,f4)
+    paragraph $cgi.div(:style=>'margin-left: 50px'){t.to_html($cgi)}
+    paragraph 'An HTTP request\'s sample:'
+    paragraph $cgi.div(:style=>'margin-left: 50px'){html_code <<-EOS
+      POST /sample HTTP/1.1
+      Accept: text/plain, application/json
+      Content-Type: application/json
+      Content-Length: 351
+      {
+        "myhash": {
+          "anotherhash": {
+            "node-1": {
+              "user": "user1",
+              "option": true
+            },
+            "node-2": {
+              "user": "user2",
+              "option": false
+            }
+          },
+          "myarray": [
+            {
+              "size": 4,
+              "setting": null
+            },
+            {
+              "size": 2
+            },
+            {
+              "size": 8
+            }
+          ]
+        }
+      }
+    EOS
+    }
+  end
+end
