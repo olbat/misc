@@ -1,0 +1,46 @@
+#!/usr/bin/ruby
+
+require 'nokogiri'
+require 'open-uri'
+require 'uri'
+
+abort "usage: #{$0} <url> <xpath>" if ARGV.size < 2
+
+begin
+  uri = URI(ARGV[0])
+
+  page = nil
+  open(uri) do |p|
+    raise ArgumentError, "Invalid page, Content-Type should be text/html" \
+      unless p.content_type == 'text/html'
+    page = p.read
+  end
+
+  doc = Nokogiri::HTML(page)
+
+  res = doc.xpath(ARGV[1])
+
+  if res and !res.empty?
+    i=0
+    res.each do |r|
+      $stdout.puts "[#{i}] #{r.to_s}"
+      i+=1
+    end
+  else
+    $stderr.puts "No results !"
+  end
+
+rescue URI::Error => e
+  abort "Invalid URI '#{ARGV[0]}'"
+rescue SocketError, Errno::ECONNREFUSED, Errno::EPIPE, Errno::ECONNRESET, \
+  OpenURI::HTTPError => e
+  abort "Cannot fetch page '#{uri}'\n#{e.message} (#{e.class.name})"
+rescue Nokogiri::XML::XPath::SyntaxError => e
+  abort "Invalid XPath '#{ARGV[1]}'\n#{e.message} (#{e.class.name})"
+rescue Nokogiri::SyntaxError => e
+  abort "Invalid HTML document\n#{e.message} (#{e.class.name})"
+rescue ArgumentError => e
+  abort e.message
+rescue Exception => e
+  abort "[Error] #{e.class.name}: #{e.message}\n#{e.backtrace}"
+end
