@@ -2,10 +2,17 @@
 
 | Directory | Description |
 |:----------|:------------|
-| [apidoc](apidoc) | REST API documentation generator |
 | [binsh](binsh) | Schell script obfuscation tool |
+| [symcrypt](symcrypt) | XOR-based symetric encrypting/decrypting program |
 | [cpubench](cpubench) | Simple CPU benchmark tool |
 | [data_spoofer](data_spoofer) | Discreetly send data over the internet (TCP forging and IP spoofing) |
-| [realtimeclock](realtimeclock) | Kernel module that read the current time from the CMOS |
-| [symcrypt](symcrypt) | A XOR-based symetric encrypting/decrypting algorithm |
-| [misc](misc) | Miscelanous programs/scripts |
+| [realtimeclock](realtimeclock) | GNU/Linux kernel module that read the current time from the CMOS |
+| [apidoc](apidoc) | REST API documentation generator |
+| [misc/fork_chain.rb](misc/fork_chain.rb) | A fork+pipe chain PoC |
+| [misc/netboot.rb](misc/netboot.rb) | PXE profile generator lib |
+| [misc/poketwich](misc/poketwich) | Bot/Client to play to TwitchPlaysPokemon |
+| [misc/port_scanner.c](misc/port_scanner.c) | TCP port scanner program (minimal nmap) |
+| [misc/rawdns.c](misc/rawdns.c) | DNS client program |
+| [misc/shlog.sh](misc/shlog.sh) | Shell session logging tool |
+| [misc/stack_ret_overwrite.c](misc/stack_ret_overwrite.c) | Stack hacking PoC |
+| [misc/web-xpath](misc/web-xpath) | HTTP XPath extractor |
