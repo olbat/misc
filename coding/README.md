@@ -8,6 +8,7 @@
 | [data_spoofer](data_spoofer) | Discreetly send data over the internet (TCP forging and IP spoofing) |
 | [realtimeclock](realtimeclock) | GNU/Linux kernel module that read the current time from the CMOS |
 | [apidoc](apidoc) | REST API documentation generator |
+| [ruby-benchs](ruby-benchs) | Small dummy benchs on Ruby standard lib components |
 | [misc/fork_chain.rb](misc/fork_chain.rb) | A fork+pipe chain PoC |
 | [misc/netboot.rb](misc/netboot.rb) | PXE profile generator lib |
 | [misc/poketwich](misc/poketwich) | Bot/Client to play to TwitchPlaysPokemon |
