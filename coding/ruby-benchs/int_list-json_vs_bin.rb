@@ -4,7 +4,7 @@ require 'stringio'
 NUM_DOCS = 10000
 NUM_WEIGHTS = 300
 BUFF_SIZE=1000
-BYTESIG='XiML'
+BYTESIG='Test'
 
 puts "docs:#{NUM_DOCS} weights:#{NUM_WEIGHTS}"
 
