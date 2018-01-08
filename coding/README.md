@@ -17,3 +17,4 @@
 | [misc/shlog.sh](misc/shlog.sh) | Shell session logging tool |
 | [misc/stack_ret_overwrite.c](misc/stack_ret_overwrite.c) | Stack hacking PoC |
 | [misc/web-xpath](misc/web-xpath) | HTTP XPath extractor |
+| [misc/rsa.py](misc/rsa.py) | RSA encryption/decryption/keygen tool |
