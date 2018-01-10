@@ -22,6 +22,12 @@ PACK_SYM = {
 
 
 def _egcd(b, n):
+    """
+    Returns the Euler's totient (Φ)
+
+    see https://en.wikipedia.org/wiki/Euler%27s_totient_function,
+        https://en.wikibooks.org/wiki/Algorithm_Implementation/Mathematics/Extended_Euclidean_algorithm#Python
+    """
     x0, x1, y0, y1 = 1, 0, 0, 1
     while n != 0:
         q, b, n = b // n, n, b % n
@@ -31,23 +37,45 @@ def _egcd(b, n):
 
 
 def _modinv(b, n):
+    """
+    Returns the modular multiplicative inverse
+
+    see https://en.wikipedia.org/wiki/Modular_multiplicative_inverse
+        https://en.wikibooks.org/wiki/Algorithm_Implementation/Mathematics/Extended_Euclidean_algorithm#Python
+    """
     g, x, _ = _egcd(b, n)
     if g == 1:
         return x % n
 
 
 def genkey(primes):
+    """
+    Generate RSA modulus and public/private exponent
+    Random primes numbers are picked from the _primes_ list to simplify
+    the implementation
+    """
     p, q = random.sample(primes, 2)
     n = p * q  # modulus
+
     e = 65537  # public exponent (see https://crypto.stackexchange.com/a/3113)
+    # calculate the exponent using Euler's totient (Φ) instead of the
+    # Carmichael (λ) one (easier implementation)
+    # see https://en.wikipedia.org/wiki/RSA_(cryptosystem)#Key_generation
     d = _modinv(e, (p - 1) * (q - 1))  # private exponent
+
     return [e, d, n]
 
 
 def encrypt(m, e, n):
+    """
+    Encrypt the _m_ message using the public exponent _e_ and the modulus _n_
+    """
     m = bytearray(m, "utf-8")
     r = bytearray(len(m) * INT_SIZE)
     o = 0
+
+    # handle message byte-per-byte: very spece-inefficient and time consuming
+    # but easy to implement and no need for padding
     for b in m:
         struct.pack_into(PACK_SYM[INT_SIZE], r, o, pow(b, e, n))
         o += INT_SIZE
@@ -55,6 +83,9 @@ def encrypt(m, e, n):
 
 
 def decrypt(m, d, n):
+    """
+    Decrypt the _m_ message using the private exponent _d_ and the modulus _n_
+    """
     m = bytearray(m)
     r = bytearray(int(len(m) / INT_SIZE))
     o = 0
@@ -65,6 +96,7 @@ def decrypt(m, d, n):
     return bytes(r)
 
 
+# main program
 if len(sys.argv) < 2:
     print(__doc__.format(sys.argv[0]), file=sys.stderr)
     sys.exit(1)
