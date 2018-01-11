@@ -6,7 +6,6 @@ modes:
   decrypt key.priv < encfile > file
 """
 
-import sys
 from math import ceil
 from io import BytesIO
 from random import sample
@@ -86,7 +85,7 @@ def encrypt(m, e, n):
     """
     Encrypt the _m_ message using the public exponent _e_ and the modulus _n_
     """
-    m = bytearray(m, "utf-8")
+    m = bytearray(m, "utf-8")  # assume that the message is UTF-8 encoded
     s = _bytesize(n)
     r = BytesIO()  # size = len(m) * s
 
@@ -106,15 +105,15 @@ def decrypt(m, d, n):
     s = _bytesize(n)
     if (len(m) % s) != 0:
         raise ValueError
-    r = bytearray(int(len(m) / s))
+    r = BytesIO()
     m = BytesIO(m)
 
     for b in iter(lambda: m.read(s), b""):
         v = int.from_bytes(b, byteorder='little', signed=False)
         b = pow(v, d, n)
-        r.append(b)
+        r.write(b.to_bytes(1, byteorder='little'))
 
-    return bytes(r)
+    return r.getvalue().decode("utf-8")
 
 
 # main program
