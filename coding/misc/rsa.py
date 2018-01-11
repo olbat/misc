@@ -4,11 +4,14 @@ modes:
   genkey  < primes.txt  # will generate the key.priv and key.pub files
   encrypt key.pub  < file > encfile
   decrypt key.priv < encfile > file
+  sign    key.priv < file > sig
+  verify  key.pub sig < file
 """
 
 from math import ceil
 from io import BytesIO
 from random import sample
+from hashlib import sha256
 
 PUBKEY_FILE = "key.pub"
 PRIVKEY_FILE = "key.priv"
@@ -116,44 +119,94 @@ def decrypt(m, d, n):
     return r.getvalue().decode("utf-8")
 
 
+def sign(m, d, n):
+    """
+    Returns the signature of the the _m_ message using the private exponent _d_
+    and the modulus _n_
+    """
+    m = bytes(m, 'utf-8')  # assume that the message is UTF-8 encoded
+    h = sha256(m).hexdigest()  # use hexdigest since encrypt needs an UTF-8 str
+    return encrypt(h, d, n)
+
+
+def verify(m, s, e, n):
+    """
+    Verify the signature _s_ of the message _m_ using the public exponent _d_
+    and the modulus _n_
+    """
+    m = bytes(m, 'utf-8')  # assume that the message is UTF-8 encoded
+    return sha256(m).hexdigest() == decrypt(s, e, n)
+
+
 # main program
-if len(sys.argv) < 2:
-    print(__doc__.format(sys.argv[0]), file=sys.stderr)
-    sys.exit(1)
+if __name__ == "__main__":
+    import sys
 
-if sys.argv[1] == "genkey":
-    primes = []
-    for line in sys.stdin:
-        primes.append(int(line.strip()))
-
-    e, d, n = genkey(primes)
-
-    with open(PUBKEY_FILE, 'w+') as f:
-        f.write(dumpkey(n, e))
-    with open(PRIVKEY_FILE, 'w+') as f:
-        f.write(dumpkey(n, d))
-
-    print("done, wrote keys to {} and {}".format(PUBKEY_FILE, PRIVKEY_FILE))
-
-elif sys.argv[1] == "encrypt":
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print(__doc__.format(sys.argv[0]), file=sys.stderr)
         sys.exit(1)
 
-    with open(sys.argv[2]) as f:
-        n, e = loadkey(f.read())
+    if sys.argv[1] == "genkey":
+        primes = []
+        for line in sys.stdin:
+            primes.append(int(line.strip()))
 
-    sys.stdout.buffer.write(encrypt(sys.stdin.read(), e, n))
+        e, d, n = genkey(primes)
 
-elif sys.argv[1] == "decrypt":
-    if len(sys.argv) < 3:
+        with open(PUBKEY_FILE, 'w+') as f:
+            f.write(dumpkey(n, e))
+        with open(PRIVKEY_FILE, 'w+') as f:
+            f.write(dumpkey(n, d))
+
+        print("wrote keys to {} and {}".format(PUBKEY_FILE, PRIVKEY_FILE))
+
+    elif sys.argv[1] == "encrypt":
+        if len(sys.argv) < 3:
+            print(__doc__.format(sys.argv[0]), file=sys.stderr)
+            sys.exit(1)
+
+        with open(sys.argv[2]) as f:
+            n, e = loadkey(f.read())
+
+        sys.stdout.buffer.write(encrypt(sys.stdin.read(), e, n))
+
+    elif sys.argv[1] == "decrypt":
+        if len(sys.argv) < 3:
+            print(__doc__.format(sys.argv[0]), file=sys.stderr)
+            sys.exit(1)
+
+        with open(sys.argv[2]) as f:
+            n, d = loadkey(f.read())
+
+        sys.stdout.write(decrypt(sys.stdin.buffer.read(), d, n))
+
+    elif sys.argv[1] == "sign":
+        if len(sys.argv) < 3:
+            print(__doc__.format(sys.argv[0]), file=sys.stderr)
+            sys.exit(1)
+
+        with open(sys.argv[2]) as f:
+            n, d = loadkey(f.read())
+
+        sys.stdout.buffer.write(sign(sys.stdin.read(), d, n))
+
+    elif sys.argv[1] == "verify":
+        if len(sys.argv) < 4:
+            print(__doc__.format(sys.argv[0]), file=sys.stderr)
+            sys.exit(1)
+
+        with open(sys.argv[2]) as f:
+            n, e = loadkey(f.read())
+        with open(sys.argv[3], 'rb') as f:
+            s = f.read()
+
+        if verify(sys.stdin.read(), s, e, n):
+            print("signature ok")
+            sys.exit(0)
+        else:
+            print("bad signature !")
+            sys.exit(1)
+
+    else:
         print(__doc__.format(sys.argv[0]), file=sys.stderr)
         sys.exit(1)
-
-    with open(sys.argv[2]) as f:
-        n, d = loadkey(f.read())
-
-    sys.stdout.buffer.write(decrypt(sys.stdin.buffer.read(), d, n))
-else:
-    print(__doc__.format(sys.argv[0]), file=sys.stderr)
-    sys.exit(1)
