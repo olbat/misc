@@ -87,13 +87,20 @@ def genkey(primes):
 def encrypt(m, e, n):
     """
     Encrypt the _m_ message using the public exponent _e_ and the modulus _n_
+
+    Note: the message is encrypted byte-per-byte using RSA instead of a
+          symetric cypher. This is not secure and very inefficient but it
+          allows to simplify the implementation as well as encrypting messages
+          bigger than the modulus.
+          (see https://security.stackexchange.com/questions/33445)
     """
     m = bytearray(m, "utf-8")  # assume that the message is UTF-8 encoded
     s = _bytesize(n)
     r = BytesIO()  # size = len(m) * s
 
-    # handle message byte-per-byte: very spece-inefficient and time consuming
-    # but easy to implement and no need for padding
+    # handle message byte-per-byte: very spece-inefficient, time consuming
+    # and insecure but easy to implement (no need for a symetric cypher, allows
+    # to work with small primes/modulus) and there is no need for padding
     for b in m:
         v = pow(b, e, n)
         r.write(v.to_bytes(s, byteorder='little', signed=False))
@@ -125,7 +132,13 @@ def sign(m, d, n):
     and the modulus _n_
     """
     m = bytes(m, 'utf-8')  # assume that the message is UTF-8 encoded
-    h = sha256(m).hexdigest()  # use hexdigest since encrypt needs an UTF-8 str
+
+    # encrypt a string version of the digest since encrypt needs an UTF-8 str
+    # and since it allows to work with a modulus smaller than the digest (= to
+    # work with small primes).
+    # (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
+    h = sha256(m).hexdigest()
+
     return encrypt(h, d, n)
 
 
