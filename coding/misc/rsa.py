@@ -1,16 +1,20 @@
 """
-usage: <mode> [<options>]
+usage: {} <mode> [<options>]
 modes:
-  genkey  < primes.txt  # will generate the key.priv and key.pub files
+  genkeys < primes.txt  # takes two primes as input (one per line)
   encrypt key.pub  < file > encfile
   decrypt key.priv < encfile > file
   sign    key.priv < file > sig
   verify  key.pub sig < file
+
+note:
+  It's possible to generate prime numbers for the "genkeys" mode using:
+  $ {{ openssl prime --generate --bits 1024 \
+     & openssl prime --generate --bits 1024; }}
 """
 
 from math import ceil
 from io import BytesIO
-from random import sample
 from hashlib import sha256
 
 PUBKEY_FILE = "key.pub"
@@ -66,13 +70,13 @@ def loadkey(s):
     return [int(v, 16) for v in s.split()]
 
 
-def genkey(primes):
+def genkeys(p, q):
     """
     Generate RSA modulus and public/private exponent
-    Random primes numbers are picked from the _primes_ list to simplify
-    the implementation
     """
-    p, q = sample(primes, 2)
+    if p == q:
+        raise ValueError
+
     n = p * q  # modulus
 
     e = 65537  # public exponent (see https://crypto.stackexchange.com/a/3113)
@@ -159,12 +163,11 @@ if __name__ == "__main__":
         print(__doc__.format(sys.argv[0]), file=sys.stderr)
         sys.exit(1)
 
-    if sys.argv[1] == "genkey":
-        primes = []
-        for line in sys.stdin:
-            primes.append(int(line.strip()))
+    if sys.argv[1] == "genkeys":
+        p = int(sys.stdin.readline())
+        q = int(sys.stdin.readline())
 
-        e, d, n = genkey(primes)
+        e, d, n = genkeys(p, q)
 
         with open(PUBKEY_FILE, 'w+') as f:
             f.write(dumpkey(n, e))
