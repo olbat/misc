@@ -1,16 +1,29 @@
 """
-usage: {} <mode> [<options>]
-modes:
-  genkeys < primes.txt  # takes two primes as input (one per line)
-  encrypt key.pub  < file > encfile
-  decrypt key.priv < encfile > file
-  sign    key.priv < file > sig
-  verify  key.pub sig < file
+usage: {0} <mode> [<options>]
 
-note:
-  It's possible to generate prime numbers for the "genkeys" mode using:
-  $ {{ openssl prime --generate --bits 1024 \
-     & openssl prime --generate --bits 1024; }}
+modes:
+  genkeys < PRIMES  # takes two primes as input (one per line)
+  encrypt PUBKEY_FILE  < FILE > ENC_FILE
+  decrypt PRIVKEY_FILE < ENC_FILE > FILE
+  sign    PRIVKEY_FILE < FILE > SIG_FILE
+  verify  PUBKEY_FILE SIG_FILE < FILE
+
+examples:
+  # generate the RSA key pair (the key.priv and key.pub files)
+  {{ openssl prime --generate --bits 1024 \\
+  & openssl prime --generate --bits 1024; }} | python {0} genkeys
+
+  # encrypt a file
+  python {0} encrypt key.pub < file.txt > file.txt.enc
+
+  # decrypt a file
+  python {0} decrypt key.priv < file.txt.enc
+
+  # sign a file
+  python {0} sign key.priv < file.txt > file.txt.sig
+
+  # verify a signature
+  python {0} verify key.pub file.sig < file.txt.sig
 """
 
 from math import ceil
