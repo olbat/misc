@@ -2,4 +2,7 @@
 
 | Script | Description |
 |:----------|:------------|
-| [rsa.py](rsa.py) | Tool to encrypt/decrypt/sign files using the RSA algorithm |
+| [RSA](rsa.py) | Tool to encrypt/decrypt/sign files using the RSA algorithm |
+| [AES](aes.py) | Tool to encrypt/decrypt files using the AES algorithm |
+
+__Note__: this scripts are toy implementations for learning purposes
