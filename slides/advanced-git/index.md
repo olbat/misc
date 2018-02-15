@@ -106,58 +106,6 @@ class: center, middle
 
 ---
 
-# A distributed revision control system
-
-### Use a temporary backup repository to store WIP
-
-* Why not rsync ?
-  * Do not copy untracked/generated files, track useful files
-  * Ability to push a single branch
-
-* Create a new repository on a remote server
-```bash
-$ ssh remote "git init --bare repo.git"
-```
-
-* Register this remote in your local repository
-```bash
-$ git remote add wip ssh://remote/absolute/path/repo.git
-```
-
-* Push current work in the WIP repository
-```bash
-$ git push --all wip
-```
-
----
-
-# A distributed revision control system
-
-### Use a temporary backup repository to store WIP
-
-* Do some work
-```bash
-$ git commit ...
-```
-
-* Push work on the WIP remote
-```bash
-$ git push wip master
-```
-
-* Continue to work
-```bash
-$ git commit --amend
-$ git rebase -i ...
-```
-
-* Once work is done push to the stable repository
-```bash
-$ git push origin master
-```
-
----
-
 class: center, middle
 
 # Git basics
