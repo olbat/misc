@@ -110,24 +110,33 @@ def _key_expansions(key):
     pass
 
 
-def _add_round_key(round_num, block, round_key):
-    pass
+def _add_round_key(round_num, block, round_keys):
+    round_key = round_keys[round_num]
+    for i in len(block):
+        for j in len(block):
+            block[i][j] ^= round_key[i][j]
 
 
 def _sub_bytes(block):
-    pass
+    for i in len(block):
+        for j in len(block):
+            block[i][j] = SBOX[(i * len(block)) + j]
 
 
 def _sub_bytes_inv(block):
-    pass
+    for i in len(block):
+        for j in len(block):
+            block[i][j] = SBOX_INV[(i * len(block)) + j]
 
 
 def _shift_rows(block):
-    pass
+    for i in len(block):
+        block[i] = block[i][1:] + block[i][:1]
 
 
 def _shift_rows_inv(block):
-    pass
+    for i in len(block):
+        block.insert(0, block.pop())
 
 
 def _mix_columns(block):
@@ -153,21 +162,21 @@ def encrypt(in_io, out_io, key):
     if keysize not in AES_KEY_TYPES:
         raise ValueError
 
-    round_key = _key_expansions(key)
+    round_keys = _key_expansions(key)
     rounds = AES_KEY_TYPES[keysize]["rounds"]
 
     for block in _blockiter(in_io):
-        _add_round_key(0, block, round_key)
+        _add_round_key(0, block, round_keys)
 
         for r in range(1, rounds):
             _sub_bytes(block)
             _shift_rows(block)
             _mix_columns(block)
-            _add_round_key(r, block, round_key)
+            _add_round_key(r, block, round_keys)
 
         _sub_bytes(block)
         _shift_rows(block)
-        _add_round_key(rounds, block, round_key)
+        _add_round_key(rounds, block, round_keys)
 
         out_io.write(_block2bytes(block))
 
@@ -177,21 +186,21 @@ def decrypt(in_io, out_io, key):
     if keysize not in AES_KEY_TYPES:
         raise ValueError
 
-    round_key = _key_expansions(key)
+    round_keys = _key_expansions(key)
     rounds = AES_KEY_TYPES[keysize]["rounds"]
 
     for block in _blockiter(in_io):
-        _add_round_key(rounds, block, round_key)
+        _add_round_key(rounds, block, round_keys)
 
         for r in reversed(range(rounds - 1)):
             _shift_rows_inv(block)
             _sub_bytes_inv(block)
-            _add_round_key(r, block, round_key)
+            _add_round_key(r, block, round_keys)
             _mix_columns_inv(block)
 
         _shift_rows_inv(block)
         _sub_bytes_inv(block)
-        _add_round_key(0, block, round_key)
+        _add_round_key(0, block, round_keys)
 
         out_io.write(bytes([b[i] for i in range(len(block)) for b in block]))
 
