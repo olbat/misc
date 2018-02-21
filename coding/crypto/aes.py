@@ -255,8 +255,42 @@ def _blockiter(io):
         yield _bytes2block(bs)
 
 
-def _key_expansions(key):
-    pass
+def _rot_word(word):
+    w = word[1:] + word[:1]
+    word.clear()
+    word.extend(w)
+
+
+def _sub_word(word):
+    for i in range(len(word)):
+        word[i] = SBOX[word[i]]
+
+
+def _key_expansions(key, keycfg):
+    expkeysize = keycfg["expkey_size"]
+    # key = [bytes([b]) for b in key]
+    # expkey = [b''] * expkeysize
+    key = [b for b in key]
+    expkey = [0] * expkeysize
+
+    nk = keycfg["key_n_size"]
+    cursize = nk
+    expkey[0:cursize] = key[0:cursize]
+
+    while cursize < expkeysize:
+        temp = expkey[cursize-4:cursize]
+        if cursize % nk == 0:
+            _rot_word(temp)
+            _sub_word(temp)
+            temp[0] ^= RCON[cursize // nk]
+        if (keycfg["size"] == 256) and (cursize % nk) == 16:
+            _sub_word(temp)
+
+        for i in range(len(temp)):
+            expkey[cursize] = expkey[cursize - nk] ^ temp[i]
+            cursize += 1
+
+    return bytes(expkey)
 
 
 def _add_round_key(round_num, block, round_keys):
