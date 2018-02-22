@@ -15,16 +15,18 @@ examples:
 """
 
 from random import getrandbits
-from math import sqrt
 
 # Types of AES keys
-# (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard)
-AES_KEY_TYPES = {
-    "128": {"size": 128, "rounds": 10},
-    "192": {"size": 192, "rounds": 12},
-    "256": {"size": 256, "rounds": 14},
+# (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard,
+#  https://en.wikipedia.org/wiki/Rijndael_key_schedule)
+KEY_TYPES = {
+    "128": {"size": 128, "rounds": 10, "key_n_size": 16, "expkey_size": 176},
+    "192": {"size": 192, "rounds": 12, "key_n_size": 24, "expkey_size": 208},
+    "256": {"size": 256, "rounds": 14, "key_n_size": 32, "expkey_size": 240},
 }
-AES_BLOCK_SIZE = 16
+
+# AES block dim
+NB = 4
 
 # Rijndael S-Box lookup tables
 # (see https://en.wikipedia.org/wiki/Rijndael_S-box)
@@ -231,10 +233,10 @@ GF256MUL = {
 }
 
 
-def _bytes2block(bs, dim=int(sqrt(AES_BLOCK_SIZE)), block_size=AES_BLOCK_SIZE):
+def _bytes2block(bs, dim=NB):
     block = [[None for _ in range(dim)] for _ in range(dim)]
     col = 0
-    for i in range(block_size):
+    for i in range(NB * NB):
         mod = (i % dim)
         if i and mod == 0:
             col += 1
@@ -247,8 +249,8 @@ def _block2bytes(block):
 
 
 def _blockiter(io):
-    for bs in iter(lambda: io.read(AES_BLOCK_SIZE), b""):
-        if len(bs) < AES_BLOCK_SIZE:
+    for bs in iter(lambda: io.read(NB*NB), b""):
+        if len(bs) < NB*NB:
             break  # FIXME: padding
 
         # recreate the block at each iteration to avoid it to be modified
@@ -266,7 +268,7 @@ def _sub_word(word):
         word[i] = SBOX[word[i]]
 
 
-def _key_expansions(key, keycfg):
+def _key_expansion(key, keycfg):
     expkeysize = keycfg["expkey_size"]
     # key = [bytes([b]) for b in key]
     # expkey = [b''] * expkeysize
@@ -293,32 +295,31 @@ def _key_expansions(key, keycfg):
     return bytes(expkey)
 
 
-def _add_round_key(round_num, block, round_keys):
-    round_key = round_keys[round_num]
-    for i in len(block):
-        for j in len(block):
-            block[i][j] ^= round_key[i][j]
+def _add_round_key(round_num, block, round_key):
+    for i in range(len(block)):
+        for j in range(len(block)):
+            block[i][j] ^= round_key[(round_num * NB * NB) + (i * NB) + j]
 
 
 def _sub_bytes(block):
-    for i in len(block):
-        for j in len(block):
-            block[i][j] = SBOX[(i * len(block)) + j]
+    for i in range(len(block)):
+        for j in range(len(block)):
+            block[i][j] = SBOX[block[i][j]]
 
 
 def _sub_bytes_inv(block):
-    for i in len(block):
-        for j in len(block):
-            block[i][j] = SBOX_INV[(i * len(block)) + j]
+    for i in range(len(block)):
+        for j in range(len(block)):
+            block[i][j] = SBOX_INV[block[i][j]]
 
 
 def _shift_rows(block):
-    for i in len(block):
+    for i in range(len(block)):
         block[i] = block[i][1:] + block[i][:1]
 
 
 def _shift_rows_inv(block):
-    for i in len(block):
+    for i in range(len(block)):
         block.insert(0, block.pop())
 
 
@@ -326,7 +327,7 @@ def _mix_columns(block):
     '''
     see https://en.wikipedia.org/wiki/Rijndael_MixColumns
     '''
-    b = [c[:] for c in block]
+    b = [w[:] for w in block]
     for i in range(len(block)):
         block[i][0] = \
             GF256MUL[2][b[i][0]] ^ GF256MUL[3][b[i][1]] ^ b[i][2] ^ b[i][3]
@@ -356,58 +357,58 @@ def _mix_columns_inv(block):
 
 def genkey(size):
     ssize = str(size)
-    if ssize not in AES_KEY_TYPES:
+    if ssize not in KEY_TYPES:
         raise ValueError
 
-    key = getrandbits(AES_KEY_TYPES[ssize]["size"])
+    key = getrandbits(KEY_TYPES[ssize]["size"])
 
     return key.to_bytes(size, 'little', signed=False)
 
 
 def encrypt(in_io, out_io, key):
     keysize = str(len(key))
-    if keysize not in AES_KEY_TYPES:
+    if keysize not in KEY_TYPES:
         raise ValueError
 
-    round_keys = _key_expansions(key)
-    rounds = AES_KEY_TYPES[keysize]["rounds"]
+    round_key = _key_expansion(key, KEY_TYPES[keysize])
+    rounds = KEY_TYPES[keysize]["rounds"]
 
     for block in _blockiter(in_io):
-        _add_round_key(0, block, round_keys)
+        _add_round_key(0, block, round_key)
 
         for r in range(1, rounds):
             _sub_bytes(block)
             _shift_rows(block)
             _mix_columns(block)
-            _add_round_key(r, block, round_keys)
+            _add_round_key(r, block, round_key)
 
         _sub_bytes(block)
         _shift_rows(block)
-        _add_round_key(rounds, block, round_keys)
+        _add_round_key(rounds, block, round_key)
 
         out_io.write(_block2bytes(block))
 
 
 def decrypt(in_io, out_io, key):
     keysize = str(len(key))
-    if keysize not in AES_KEY_TYPES:
+    if keysize not in KEY_TYPES:
         raise ValueError
 
-    round_keys = _key_expansions(key)
-    rounds = AES_KEY_TYPES[keysize]["rounds"]
+    round_key = _key_expansion(key, KEY_TYPES[keysize])
+    rounds = KEY_TYPES[keysize]["rounds"]
 
     for block in _blockiter(in_io):
-        _add_round_key(rounds, block, round_keys)
+        _add_round_key(rounds, block, round_key)
 
         for r in reversed(range(rounds - 1)):
             _shift_rows_inv(block)
             _sub_bytes_inv(block)
-            _add_round_key(r, block, round_keys)
+            _add_round_key(r, block, round_key)
             _mix_columns_inv(block)
 
         _shift_rows_inv(block)
         _sub_bytes_inv(block)
-        _add_round_key(0, block, round_keys)
+        _add_round_key(0, block, round_key)
 
         out_io.write(bytes([b[i] for i in range(len(block)) for b in block]))
 
