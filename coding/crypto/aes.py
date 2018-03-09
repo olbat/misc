@@ -234,6 +234,7 @@ GF256MUL = {
 
 
 def _bytes2block(bs, dim=NB):
+    # array of rows
     block = [[None for _ in range(dim)] for _ in range(dim)]
     col = 0
     for i in range(NB * NB):
@@ -295,10 +296,10 @@ def _key_expansion(key, keycfg):
     return bytes(expkey)
 
 
-def _add_round_key(round_num, block, round_key):
+def _add_round_key(round_num, block, expkey):
     for i in range(len(block)):
         for j in range(len(block)):
-            block[i][j] ^= round_key[(round_num * NB * NB) + (i * NB) + j]
+            block[j][i] ^= expkey[(round_num * NB * NB) + (i * NB) + j]
 
 
 def _sub_bytes(block):
@@ -314,13 +315,15 @@ def _sub_bytes_inv(block):
 
 
 def _shift_rows(block):
-    for i in range(len(block)):
-        block[i] = block[i][1:] + block[i][:1]
+    block[1] = block[1][1:] + block[1][:1]
+    block[2] = block[2][2:] + block[2][:2]
+    block[3] = block[3][3:] + block[3][:3]
 
 
 def _shift_rows_inv(block):
-    for i in range(len(block)):
-        block.insert(0, block.pop())
+    block[1] = block[1][3:] + block[1][:3]
+    block[2] = block[2][2:] + block[2][:2]
+    block[3] = block[3][1:] + block[3][:1]
 
 
 def _mix_columns(block):
@@ -329,14 +332,14 @@ def _mix_columns(block):
     '''
     b = [w[:] for w in block]
     for i in range(len(block)):
-        block[i][0] = \
-            GF256MUL[2][b[i][0]] ^ GF256MUL[3][b[i][1]] ^ b[i][2] ^ b[i][3]
-        block[i][1] = \
-            b[i][0] ^ GF256MUL[2][b[i][1]] ^ GF256MUL[3][b[i][2]] ^ b[i][3]
-        block[i][2] = \
-            b[i][0] ^ b[i][1] ^ GF256MUL[2][b[i][2]] ^ GF256MUL[3][b[i][3]]
-        block[i][3] = \
-            GF256MUL[3][b[i][0]] ^ b[i][1] ^ b[i][2] ^ GF256MUL[2][b[i][3]]
+        block[0][i] = \
+            GF256MUL[2][b[0][i]] ^ GF256MUL[3][b[1][i]] ^ b[2][i] ^ b[3][i]
+        block[1][i] = \
+            b[0][i] ^ GF256MUL[2][b[1][i]] ^ GF256MUL[3][b[2][i]] ^ b[3][i]
+        block[2][i] = \
+            b[0][i] ^ b[1][i] ^ GF256MUL[2][b[2][i]] ^ GF256MUL[3][b[3][i]]
+        block[3][i] = \
+            GF256MUL[3][b[0][i]] ^ b[1][i] ^ b[2][i] ^ GF256MUL[2][b[3][i]]
 
 
 def _mix_columns_inv(block):
@@ -345,14 +348,14 @@ def _mix_columns_inv(block):
     '''
     b = [c[:] for c in block]
     for i in range(len(block)):
-        block[i][0] = GF256MUL[14][b[i][0]] ^ GF256MUL[11][b[i][1]] \
-            ^ GF256MUL[13][b[i][2]] ^ GF256MUL[9][b[i][3]]
-        block[i][1] = GF256MUL[9][b[i][0]] ^ GF256MUL[14][b[i][1]] \
-            ^ GF256MUL[11][b[i][2]] ^ GF256MUL[13][b[i][3]]
-        block[i][2] = GF256MUL[13][b[i][0]] ^ GF256MUL[9][b[i][1]] \
-            ^ GF256MUL[14][b[i][2]] ^ GF256MUL[11][b[i][3]]
-        block[i][3] = GF256MUL[11][b[i][0]] ^ GF256MUL[13][b[i][1]] \
-            ^ GF256MUL[9][b[i][2]] ^ GF256MUL[14][b[i][3]]
+        block[0][i] = GF256MUL[14][b[0][i]] ^ GF256MUL[11][b[1][i]] \
+            ^ GF256MUL[13][b[2][i]] ^ GF256MUL[9][b[3][i]]
+        block[1][i] = GF256MUL[9][b[0][i]] ^ GF256MUL[14][b[1][i]] \
+            ^ GF256MUL[11][b[2][i]] ^ GF256MUL[13][b[3][i]]
+        block[2][i] = GF256MUL[13][b[0][i]] ^ GF256MUL[9][b[1][i]] \
+            ^ GF256MUL[14][b[2][i]] ^ GF256MUL[11][b[3][i]]
+        block[3][i] = GF256MUL[11][b[0][i]] ^ GF256MUL[13][b[1][i]] \
+            ^ GF256MUL[9][b[2][i]] ^ GF256MUL[14][b[3][i]]
 
 
 def genkey(size):
@@ -370,21 +373,21 @@ def encrypt(in_io, out_io, key):
     if keysize not in KEY_TYPES:
         raise ValueError
 
-    round_key = _key_expansion(key, KEY_TYPES[keysize])
+    expkey = _key_expansion(key, KEY_TYPES[keysize])
     rounds = KEY_TYPES[keysize]["rounds"]
 
     for block in _blockiter(in_io):
-        _add_round_key(0, block, round_key)
+        _add_round_key(0, block, expkey)
 
         for r in range(1, rounds):
             _sub_bytes(block)
             _shift_rows(block)
             _mix_columns(block)
-            _add_round_key(r, block, round_key)
+            _add_round_key(r, block, expkey)
 
         _sub_bytes(block)
         _shift_rows(block)
-        _add_round_key(rounds, block, round_key)
+        _add_round_key(rounds, block, expkey)
 
         out_io.write(_block2bytes(block))
 
@@ -400,7 +403,7 @@ def decrypt(in_io, out_io, key):
     for block in _blockiter(in_io):
         _add_round_key(rounds, block, round_key)
 
-        for r in reversed(range(rounds - 1)):
+        for r in range(rounds - 1, 1, -1):
             _shift_rows_inv(block)
             _sub_bytes_inv(block)
             _add_round_key(r, block, round_key)
@@ -410,7 +413,7 @@ def decrypt(in_io, out_io, key):
         _sub_bytes_inv(block)
         _add_round_key(0, block, round_key)
 
-        out_io.write(bytes([b[i] for i in range(len(block)) for b in block]))
+        out_io.write(_block2bytes(block))
 
 
 # main program
