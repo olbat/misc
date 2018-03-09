@@ -236,17 +236,16 @@ GF256MUL = {
 def _bytes2block(bs, dim=NB):
     # array of rows
     block = [[None for _ in range(dim)] for _ in range(dim)]
-    col = 0
-    for i in range(NB * NB):
-        mod = (i % dim)
-        if i and mod == 0:
-            col += 1
-        block[mod][col] = bs[i]
+    for i in range(dim * dim):
+        block[i % dim][i // dim] = bs[i]
     return block
 
 
-def _block2bytes(block):
-    return bytes([b[i] for i in range(len(block)) for b in block])
+def _block2bytes(block, dim=NB):
+    bs = []
+    for i in range(dim * dim):
+        bs.append(block[i % dim][i // dim])
+    return bytes(bs)
 
 
 def _blockiter(io):
