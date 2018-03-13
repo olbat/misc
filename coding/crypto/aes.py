@@ -15,6 +15,7 @@ examples:
 """
 
 from random import getrandbits
+from io import SEEK_CUR
 
 # Types of AES keys
 # (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard,
@@ -248,15 +249,6 @@ def _block2bytes(block, dim=NB):
     return bytes(bs)
 
 
-def _blockiter(io):
-    for bs in iter(lambda: io.read(NB*NB), b""):
-        if len(bs) < NB*NB:
-            break  # FIXME: padding
-
-        # recreate the block at each iteration to avoid it to be modified
-        yield _bytes2block(bs)
-
-
 def _rot_word(word):
     w = word[1:] + word[:1]
     word.clear()
@@ -296,9 +288,8 @@ def _key_expansion(key, keycfg):
 
 
 def _add_round_key(round_num, block, expkey):
-    for i in range(len(block)):
-        for j in range(len(block)):
-            block[j][i] ^= expkey[(round_num * NB * NB) + (i * NB) + j]
+    for i in range(NB*NB):
+        block[i % NB][i // NB] ^= expkey[(round_num * NB * NB) + i]
 
 
 def _sub_bytes(block):
@@ -357,6 +348,91 @@ def _mix_columns_inv(block):
             ^ GF256MUL[9][b[2][i]] ^ GF256MUL[14][b[3][i]]
 
 
+def _encrypt_moo(in_io, out_io, moo):
+    '''
+    Block cipher mode of operation
+    (see https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation)
+    '''
+    if moo != "ECB":
+        iv = getrandbits(16 * 8).to_bytes(16, 'little')
+        out_io.write(bytes(iv))
+
+    llen = None
+    for pt in iter(lambda: in_io.read(NB*NB), b""):
+        llen = len(pt)
+
+        if llen < NB*NB:
+            # PKCS#7 padding
+            # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
+            if (moo == "EBC") or (moo == "CBC"):
+                pn = (NB*NB) - llen
+                pt += bytes([pn for _ in range(pn)])
+
+        if moo == "CBC":
+            pt = [b for b in pt]
+            for i in range(NB*NB):
+                pt[i] ^= iv[i]
+            pt = bytes(pt)
+
+        # block is modified in place
+        block = _bytes2block(pt)
+        yield block
+        bs = _block2bytes(block)
+
+        if moo == "CBC":
+            iv = [b for b in bs]
+
+        out_io.write(bs)
+
+    if llen == NB*NB:
+        # PKCS#7 padding
+        # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
+        if (moo == "EBC") or (moo == "CBC"):
+            block = _bytes2block(bytes([llen for _ in range(llen)]))
+            yield block
+            out_io.write(_block2bytes(block))
+
+
+def _decrypt_moo(in_io, out_io, moo):
+    '''
+    Block cipher mode of operation
+    (see https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation)
+    '''
+    if moo != "ECB":
+        iv = [b for b in in_io.read(NB*NB)]
+
+    for ct in iter(lambda: in_io.read(NB*NB), b""):
+        # FIXME: ugly hack
+        last_block = (in_io.read(1) == b"")
+        if not last_block:
+            in_io.seek(-1, SEEK_CUR)
+
+        if len(ct) < NB*NB:
+            if (moo == "EBC") or (moo == "CBC"):
+                raise ValueError
+
+        block = _bytes2block(ct)
+        # block is modified in place
+        yield block
+        bs = _block2bytes(block)
+
+        if moo == "CBC":
+            bs = [b for b in bs]
+            for i in range(NB*NB):
+                bs[i] ^= iv[i]
+            iv = ct
+
+        # PKCS#7 padding
+        # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
+        if (moo == "EBC") or (moo == "CBC"):
+            if last_block:
+                bs = bytes(bs[:-bs[-1]])
+            else:
+                bs = bytes(bs)
+
+        out_io.write(bs)
+
+
 def genkey(size):
     ssize = str(size)
     if ssize not in KEY_TYPES:
@@ -364,18 +440,18 @@ def genkey(size):
 
     key = getrandbits(KEY_TYPES[ssize]["size"])
 
-    return key.to_bytes(size, 'little', signed=False)
+    return key.to_bytes(size // 8, 'little', signed=False)
 
 
-def encrypt(in_io, out_io, key):
-    keysize = str(len(key))
+def encrypt(in_io, out_io, key, moo="CBC"):
+    keysize = str(len(key) * 8)
     if keysize not in KEY_TYPES:
         raise ValueError
 
     expkey = _key_expansion(key, KEY_TYPES[keysize])
     rounds = KEY_TYPES[keysize]["rounds"]
 
-    for block in _blockiter(in_io):
+    for block in _encrypt_moo(in_io, out_io, moo):
         _add_round_key(0, block, expkey)
 
         for r in range(1, rounds):
@@ -388,21 +464,21 @@ def encrypt(in_io, out_io, key):
         _shift_rows(block)
         _add_round_key(rounds, block, expkey)
 
-        out_io.write(_block2bytes(block))
+        # out_io.write(_block2bytes(block))
 
 
-def decrypt(in_io, out_io, key):
-    keysize = str(len(key))
+def decrypt(in_io, out_io, key, moo="CBC"):
+    keysize = str(len(key) * 8)
     if keysize not in KEY_TYPES:
         raise ValueError
 
     round_key = _key_expansion(key, KEY_TYPES[keysize])
     rounds = KEY_TYPES[keysize]["rounds"]
 
-    for block in _blockiter(in_io):
+    for block in _decrypt_moo(in_io, out_io, moo):
         _add_round_key(rounds, block, round_key)
 
-        for r in range(rounds - 1, 1, -1):
+        for r in range(rounds - 1, 0, -1):
             _shift_rows_inv(block)
             _sub_bytes_inv(block)
             _add_round_key(r, block, round_key)
@@ -412,7 +488,7 @@ def decrypt(in_io, out_io, key):
         _sub_bytes_inv(block)
         _add_round_key(0, block, round_key)
 
-        out_io.write(_block2bytes(block))
+        # out_io.write(_block2bytes(block))
 
 
 # main program
