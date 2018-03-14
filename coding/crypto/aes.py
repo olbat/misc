@@ -320,32 +320,34 @@ def _mix_columns(block):
     '''
     see https://en.wikipedia.org/wiki/Rijndael_MixColumns
     '''
-    b = [w[:] for w in block]
     for i in range(len(block)):
-        block[0][i] = \
-            GF256MUL[2][b[0][i]] ^ GF256MUL[3][b[1][i]] ^ b[2][i] ^ b[3][i]
-        block[1][i] = \
-            b[0][i] ^ GF256MUL[2][b[1][i]] ^ GF256MUL[3][b[2][i]] ^ b[3][i]
-        block[2][i] = \
-            b[0][i] ^ b[1][i] ^ GF256MUL[2][b[2][i]] ^ GF256MUL[3][b[3][i]]
-        block[3][i] = \
-            GF256MUL[3][b[0][i]] ^ b[1][i] ^ b[2][i] ^ GF256MUL[2][b[3][i]]
+        i0 = block[0][i]
+        i1 = block[1][i]
+        i2 = block[2][i]
+        i3 = block[3][i]
+        block[0][i] = GF256MUL[2][i0] ^ GF256MUL[3][i1] ^ i2 ^ i3
+        block[1][i] = i0 ^ GF256MUL[2][i1] ^ GF256MUL[3][i2] ^ i3
+        block[2][i] = i0 ^ i1 ^ GF256MUL[2][i2] ^ GF256MUL[3][i3]
+        block[3][i] = GF256MUL[3][i0] ^ i1 ^ i2 ^ GF256MUL[2][i3]
 
 
 def _mix_columns_inv(block):
     '''
     see https://en.wikipedia.org/wiki/Rijndael_MixColumns
     '''
-    b = [c[:] for c in block]
     for i in range(len(block)):
-        block[0][i] = GF256MUL[14][b[0][i]] ^ GF256MUL[11][b[1][i]] \
-            ^ GF256MUL[13][b[2][i]] ^ GF256MUL[9][b[3][i]]
-        block[1][i] = GF256MUL[9][b[0][i]] ^ GF256MUL[14][b[1][i]] \
-            ^ GF256MUL[11][b[2][i]] ^ GF256MUL[13][b[3][i]]
-        block[2][i] = GF256MUL[13][b[0][i]] ^ GF256MUL[9][b[1][i]] \
-            ^ GF256MUL[14][b[2][i]] ^ GF256MUL[11][b[3][i]]
-        block[3][i] = GF256MUL[11][b[0][i]] ^ GF256MUL[13][b[1][i]] \
-            ^ GF256MUL[9][b[2][i]] ^ GF256MUL[14][b[3][i]]
+        i0 = block[0][i]
+        i1 = block[1][i]
+        i2 = block[2][i]
+        i3 = block[3][i]
+        block[0][i] = GF256MUL[14][i0] ^ GF256MUL[11][i1] \
+            ^ GF256MUL[13][i2] ^ GF256MUL[9][i3]
+        block[1][i] = GF256MUL[9][i0] ^ GF256MUL[14][i1] \
+            ^ GF256MUL[11][i2] ^ GF256MUL[13][i3]
+        block[2][i] = GF256MUL[13][i0] ^ GF256MUL[9][i1] \
+            ^ GF256MUL[14][i2] ^ GF256MUL[11][i3]
+        block[3][i] = GF256MUL[11][i0] ^ GF256MUL[13][i1] \
+            ^ GF256MUL[9][i2] ^ GF256MUL[14][i3]
 
 
 def _encrypt_moo(in_io, out_io, moo):
@@ -448,21 +450,25 @@ def encrypt(in_io, out_io, key, moo="CBC"):
     if keysize not in KEY_TYPES:
         raise ValueError
 
-    expkey = _key_expansion(key, KEY_TYPES[keysize])
     rounds = KEY_TYPES[keysize]["rounds"]
+    expkey = _key_expansion(key, KEY_TYPES[keysize])
+
+    # split the expansion key in chunks of size 16 to speedup _add_round_key
+    ks = len(expkey) // 16
+    expkeys = [expkey[i::ks] for i in range(ks)]
 
     for block in _encrypt_moo(in_io, out_io, moo):
-        _add_round_key(0, block, expkey)
+        _add_round_key(block, expkeys[0])
 
         for r in range(1, rounds):
             _sub_bytes(block)
             _shift_rows(block)
             _mix_columns(block)
-            _add_round_key(r, block, expkey)
+            _add_round_key(block, expkeys[r])
 
         _sub_bytes(block)
         _shift_rows(block)
-        _add_round_key(rounds, block, expkey)
+        _add_round_key(block, expkeys[rounds])
 
         # out_io.write(_block2bytes(block))
 
@@ -472,21 +478,25 @@ def decrypt(in_io, out_io, key, moo="CBC"):
     if keysize not in KEY_TYPES:
         raise ValueError
 
-    round_key = _key_expansion(key, KEY_TYPES[keysize])
     rounds = KEY_TYPES[keysize]["rounds"]
+    expkey = _key_expansion(key, KEY_TYPES[keysize])
+
+    # split the expansion key in chunks of size 16 to speedup _add_round_key
+    ks = len(expkey) // 16
+    expkeys = [expkey[i::ks] for i in range(ks)]
 
     for block in _decrypt_moo(in_io, out_io, moo):
-        _add_round_key(rounds, block, round_key)
+        _add_round_key(block, expkeys[rounds])
 
         for r in range(rounds - 1, 0, -1):
             _shift_rows_inv(block)
             _sub_bytes_inv(block)
-            _add_round_key(r, block, round_key)
+            _add_round_key(block, expkeys[r])
             _mix_columns_inv(block)
 
         _shift_rows_inv(block)
         _sub_bytes_inv(block)
-        _add_round_key(0, block, round_key)
+        _add_round_key(block, expkeys[0])
 
         # out_io.write(_block2bytes(block))
 
