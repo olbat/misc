@@ -13,6 +13,8 @@ examples:
   # decrypt a file
   python {0} decrypt key.txt < file.txt.enc
 """
+# see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard
+#     https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.197.pdf
 
 from random import getrandbits
 from io import SEEK_CUR
@@ -235,6 +237,10 @@ GF256MUL = {
 
 
 def _bytes2block(bs, dim=NB):
+    '''
+    Bytes to block (column-major order matrix of bytes) utility function
+    (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#Description_of_the_cipher)
+    '''
     # array of rows
     block = [[None for _ in range(dim)] for _ in range(dim)]
     for i in range(dim * dim):
@@ -243,6 +249,10 @@ def _bytes2block(bs, dim=NB):
 
 
 def _block2bytes(block, dim=NB):
+    '''
+    Block (column-major order matrix of bytes) to bytes utility function
+    (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#Description_of_the_cipher)
+    '''
     bs = []
     for i in range(dim * dim):
         bs.append(block[i % dim][i // dim])
@@ -261,6 +271,10 @@ def _sub_word(word):
 
 
 def _key_expansion(key, keycfg):
+    '''
+    Rijndael key schedule
+    (see https://en.wikipedia.org/wiki/Rijndael_key_schedule)
+    '''
     expkeysize = keycfg["expkey_size"]
     # key = [bytes([b]) for b in key]
     # expkey = [b''] * expkeysize
@@ -287,30 +301,52 @@ def _key_expansion(key, keycfg):
     return bytes(expkey)
 
 
-def _add_round_key(round_num, block, expkey):
+def _add_round_key(block, rkey):
+    '''
+    AES' AddRoundKey step
+    (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#The_AddRoundKey_step)
+    '''
     for i in range(NB*NB):
-        block[i % NB][i // NB] ^= expkey[(round_num * NB * NB) + i]
+        block[i % NB][i // NB] ^= rkey[i]
 
 
 def _sub_bytes(block):
-    for i in range(len(block)):
-        for j in range(len(block)):
+    '''
+    AES' SubBytes step
+    (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#The_SubBytes_step,
+         https://en.wikipedia.org/wiki/Rijndael_S-box)
+    '''
+    for i in range(NB):
+        for j in range(NB):
             block[i][j] = SBOX[block[i][j]]
 
 
 def _sub_bytes_inv(block):
-    for i in range(len(block)):
-        for j in range(len(block)):
+    '''
+    AES' inverse SubBytes step
+    (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#The_SubBytes_step,
+         https://en.wikipedia.org/wiki/Rijndael_S-box)
+    '''
+    for i in range(NB):
+        for j in range(NB):
             block[i][j] = SBOX_INV[block[i][j]]
 
 
 def _shift_rows(block):
+    '''
+    AES' ShiftRows step
+    (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#The_ShiftRows_step)
+    '''
     block[1] = block[1][1:] + block[1][:1]
     block[2] = block[2][2:] + block[2][:2]
     block[3] = block[3][3:] + block[3][:3]
 
 
 def _shift_rows_inv(block):
+    '''
+    AES' inverse ShiftRows step
+    (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#The_ShiftRows_step)
+    '''
     block[1] = block[1][3:] + block[1][:3]
     block[2] = block[2][2:] + block[2][:2]
     block[3] = block[3][1:] + block[3][:1]
@@ -318,7 +354,8 @@ def _shift_rows_inv(block):
 
 def _mix_columns(block):
     '''
-    see https://en.wikipedia.org/wiki/Rijndael_MixColumns
+    AES' MixColumns step
+    (see https://en.wikipedia.org/wiki/Rijndael_MixColumns)
     '''
     for i in range(len(block)):
         i0 = block[0][i]
@@ -333,7 +370,8 @@ def _mix_columns(block):
 
 def _mix_columns_inv(block):
     '''
-    see https://en.wikipedia.org/wiki/Rijndael_MixColumns
+    AES' inverse MixColumns step
+    (see https://en.wikipedia.org/wiki/Rijndael_MixColumns)
     '''
     for i in range(len(block)):
         i0 = block[0][i]
@@ -436,6 +474,9 @@ def _decrypt_moo(in_io, out_io, moo):
 
 
 def genkey(size):
+    '''
+    Key generation
+    '''
     ssize = str(size)
     if ssize not in KEY_TYPES:
         raise ValueError
@@ -446,6 +487,10 @@ def genkey(size):
 
 
 def encrypt(in_io, out_io, key, moo="CBC"):
+    '''
+    AES encryption
+    (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#High-level_description_of_the_algorithm)
+    '''
     keysize = str(len(key) * 8)
     if keysize not in KEY_TYPES:
         raise ValueError
@@ -474,6 +519,10 @@ def encrypt(in_io, out_io, key, moo="CBC"):
 
 
 def decrypt(in_io, out_io, key, moo="CBC"):
+    '''
+    AES decryption
+    (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#High-level_description_of_the_algorithm)
+    '''
     keysize = str(len(key) * 8)
     if keysize not in KEY_TYPES:
         raise ValueError
