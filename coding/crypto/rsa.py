@@ -32,6 +32,7 @@ from hashlib import sha256
 
 PUBKEY_FILE = "key.pub"
 PRIVKEY_FILE = "key.priv"
+BUF_SIZE = 4096
 
 
 def _egcd(b, n):
@@ -101,9 +102,10 @@ def genkeys(p, q):
     return [e, d, n]
 
 
-def encrypt(m, e, n):
+def encrypt(iio, oio, e, n):
     """
-    Encrypt the _m_ message using the public exponent _e_ and the modulus _n_
+    Encrypt message from _iio_ to _oio_ using the public exponent
+    _e_ and the modulus _n_
 
     Note: the message is encrypted byte-per-byte using RSA instead of a
           symetric cypher. This is not secure and very inefficient but it
@@ -111,61 +113,72 @@ def encrypt(m, e, n):
           bigger than the modulus.
           (see https://security.stackexchange.com/questions/33445)
     """
-    m = bytearray(m, "utf-8")  # assume that the message is UTF-8 encoded
     s = _bytesize(n)
-    r = BytesIO()  # size = len(m) * s
 
     # handle message byte-per-byte: very spece-inefficient, time consuming
     # and insecure but easy to implement (no need for a symetric cypher, allows
     # to work with small primes/modulus) and there is no need for padding
-    for b in m:
+    for b in iter(lambda: iio.read(1), b""):
+        b = int.from_bytes(b, byteorder='little', signed=False)
         v = pow(b, e, n)
-        r.write(v.to_bytes(s, byteorder='little', signed=False))
-
-    return r.getvalue()
+        oio.write(v.to_bytes(s, byteorder='little', signed=False))
 
 
-def decrypt(m, d, n):
+def decrypt(iio, oio, d, n):
     """
-    Decrypt the _m_ message using the private exponent _d_ and the modulus _n_
+    Decrypt message from _iio_ to _oio_ using the private exponent _d_ and the
+    modulus _n_
     """
     s = _bytesize(n)
-    if (len(m) % s) != 0:
-        raise ValueError
-    r = BytesIO()
-    m = BytesIO(m)
 
-    for b in iter(lambda: m.read(s), b""):
+    for b in iter(lambda: iio.read(s), b""):
         v = int.from_bytes(b, byteorder='little', signed=False)
         b = pow(v, d, n)
-        r.write(b.to_bytes(1, byteorder='little'))
-
-    return r.getvalue().decode("utf-8")
+        oio.write(b.to_bytes(1, byteorder='little'))
 
 
-def sign(m, d, n):
+def sign(iio, oio, d, n):
     """
-    Returns the signature of the the _m_ message using the private exponent _d_
-    and the modulus _n_
+    Returns the signature of the message from _iio_ to _oio_ using the private
+    exponent _d_ and the modulus _n_
     """
-    m = bytes(m, 'utf-8')  # assume that the message is UTF-8 encoded
-
     # encrypt a string version of the digest since encrypt needs an UTF-8 str
     # and since it allows to work with a modulus smaller than the digest (= to
     # work with small primes).
     # (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
-    h = sha256(m).hexdigest()
 
-    return encrypt(h, d, n)
+    h = sha256()
+    for bs in iter(lambda: iio.read(BUF_SIZE), b""):
+        h.update(bs)
+
+    hio = BytesIO()
+    hio.write(h.digest())
+    hio.seek(0)
+
+    return encrypt(hio, oio, d, n)
 
 
-def verify(m, s, e, n):
+def verify(iio, s, e, n):
     """
-    Verify the signature _s_ of the message _m_ using the public exponent _d_
-    and the modulus _n_
+    Verify the signature _s_ of the message from _iio_ using the public
+    exponent _d_ and the modulus _n_
     """
-    m = bytes(m, 'utf-8')  # assume that the message is UTF-8 encoded
-    return sha256(m).hexdigest() == decrypt(s, e, n)
+    # compute the expected hash
+    exph = sha256()
+    for bs in iter(lambda: iio.read(BUF_SIZE), b""):
+        exph.update(bs)
+    exph = exph.digest()
+
+    # extract (decrypt) the hash from the signature
+    sigio = BytesIO()
+    sigio.write(s)
+    sigio.seek(0)
+    sigh = BytesIO()
+    decrypt(sigio, sigh, e, n)
+    sigh.seek(0)
+    sigh = sigh.read()
+
+    return exph == sigh
 
 
 # main program
@@ -197,7 +210,7 @@ if __name__ == "__main__":
         with open(sys.argv[2]) as f:
             n, e = loadkey(f.read())
 
-        sys.stdout.buffer.write(encrypt(sys.stdin.read(), e, n))
+        encrypt(sys.stdin.buffer, sys.stdout.buffer, e, n)
 
     elif sys.argv[1] == "decrypt":
         if len(sys.argv) < 3:
@@ -207,7 +220,7 @@ if __name__ == "__main__":
         with open(sys.argv[2]) as f:
             n, d = loadkey(f.read())
 
-        sys.stdout.write(decrypt(sys.stdin.buffer.read(), d, n))
+        decrypt(sys.stdin.buffer, sys.stdout.buffer, d, n)
 
     elif sys.argv[1] == "sign":
         if len(sys.argv) < 3:
@@ -217,7 +230,7 @@ if __name__ == "__main__":
         with open(sys.argv[2]) as f:
             n, d = loadkey(f.read())
 
-        sys.stdout.buffer.write(sign(sys.stdin.read(), d, n))
+        sign(sys.stdin.buffer, sys.stdout.buffer, d, n)
 
     elif sys.argv[1] == "verify":
         if len(sys.argv) < 4:
@@ -229,7 +242,7 @@ if __name__ == "__main__":
         with open(sys.argv[3], 'rb') as f:
             s = f.read()
 
-        if verify(sys.stdin.read(), s, e, n):
+        if verify(sys.stdin.buffer, s, e, n):
             print("signature ok")
             sys.exit(0)
         else:
