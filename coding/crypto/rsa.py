@@ -24,7 +24,11 @@ examples:
 
   # verify a signature
   python {0} verify key.pub file.sig < file.txt.sig
+
+note: the encryption algorithm is using AES and the signature one SHA-2
 """
+# see https://en.wikipedia.org/wiki/RSA_(cryptosystem)
+#     https://www.emc.com/collateral/white-papers/h11300-pkcs-1v2-2-rsa-cryptography-standard-wp.pdf
 
 from math import ceil
 from io import BytesIO
@@ -32,6 +36,7 @@ from hashlib import sha256
 
 PUBKEY_FILE = "key.pub"
 PRIVKEY_FILE = "key.priv"
+AES_KEY_SIZE = 256
 BUF_SIZE = 4096
 
 
@@ -104,8 +109,48 @@ def genkeys(p, q):
 
 def encrypt(iio, oio, e, n):
     """
-    Encrypt message from _iio_ to _oio_ using the public exponent
-    _e_ and the modulus _n_
+    Encrypt message from _iio_ to _oio_ using the public exponent_e_,
+    the modulus _n_ and the AES algorithm
+    """
+    import aes
+    s = _bytesize(n)
+    # the RSA modulus is too small to encrypt the AES key
+    if s < (AES_KEY_SIZE // 8):
+        raise ValueError
+
+    # generate the key for the AES algorithm
+    k = aes.genkey(AES_KEY_SIZE)
+
+    # encrypt and save it using the RSA algorithm
+    b = int.from_bytes(k, byteorder='little', signed=False)
+    v = pow(b, e, n)
+    oio.write(v.to_bytes(s, byteorder='little', signed=False))
+
+    # encrypt the message from the input IO using AES
+    aes.encrypt(iio, oio, k)
+
+
+def decrypt(iio, oio, d, n):
+    """
+    Decrypt message from _iio_ to _oio_ using the private exponent _d_,
+    the modulus _n_ and the AES algorithm
+    """
+    import aes
+    s = _bytesize(n)
+
+    # read and decrypt the AES key using the RSA algorithm
+    v = int.from_bytes(iio.read(s), byteorder='little', signed=False)
+    b = pow(v, d, n)
+    k = b.to_bytes(AES_KEY_SIZE // 8, byteorder='little')
+
+    # decrypt the message from the input IO using AES
+    aes.decrypt(iio, oio, k)
+
+
+def encrypt_standalone(iio, oio, e, n):
+    """
+    Encrypt message from _iio_ to _oio_ using the public exponent _e_
+    and the modulus _n_
 
     Note: the message is encrypted byte-per-byte using RSA instead of a
           symetric cypher. This is not secure and very inefficient but it
@@ -124,13 +169,22 @@ def encrypt(iio, oio, e, n):
         oio.write(v.to_bytes(s, byteorder='little', signed=False))
 
 
-def decrypt(iio, oio, d, n):
+def decrypt_standalone(iio, oio, d, n):
     """
     Decrypt message from _iio_ to _oio_ using the private exponent _d_ and the
     modulus _n_
+
+    Note: the message is decrypted byte-per-byte using RSA instead of a
+          symetric cypher. This is not secure and very inefficient but it
+          allows to simplify the implementation as well as encrypting messages
+          bigger than the modulus.
+          (see https://security.stackexchange.com/questions/33445)
     """
     s = _bytesize(n)
 
+    # handle message byte-per-byte: very spece-inefficient, time consuming
+    # and insecure but easy to implement (no need for a symetric cypher, allows
+    # to work with small primes/modulus) and there is no need for padding
     for b in iter(lambda: iio.read(s), b""):
         v = int.from_bytes(b, byteorder='little', signed=False)
         b = pow(v, d, n)
@@ -140,7 +194,7 @@ def decrypt(iio, oio, d, n):
 def sign(iio, oio, d, n):
     """
     Returns the signature of the message from _iio_ to _oio_ using the private
-    exponent _d_ and the modulus _n_
+    exponent _d_, the modulus _n_ and the SHA-2 algorithm
     """
     # encrypt a string version of the digest since encrypt needs an UTF-8 str
     # and since it allows to work with a modulus smaller than the digest (= to
@@ -161,7 +215,7 @@ def sign(iio, oio, d, n):
 def verify(iio, s, e, n):
     """
     Verify the signature _s_ of the message from _iio_ using the public
-    exponent _d_ and the modulus _n_
+    exponent _d_, the modulus _n_ and the SHA-2 algorithm
     """
     # compute the expected hash
     exph = sha256()
@@ -184,6 +238,7 @@ def verify(iio, s, e, n):
 # main program
 if __name__ == "__main__":
     import sys
+    import importlib.util
 
     if len(sys.argv) < 2:
         print(__doc__.format(sys.argv[0]), file=sys.stderr)
@@ -210,7 +265,12 @@ if __name__ == "__main__":
         with open(sys.argv[2]) as f:
             n, e = loadkey(f.read())
 
-        encrypt(sys.stdin.buffer, sys.stdout.buffer, e, n)
+        if importlib.util.find_spec("aes"):
+            encrypt(sys.stdin.buffer, sys.stdout.buffer, e, n)
+        else:
+            print("WARNING: no AES implementation available, using RSA",
+                  file=sys.stderr)
+            encrypt_standalone(sys.stdin.buffer, sys.stdout.buffer, e, n)
 
     elif sys.argv[1] == "decrypt":
         if len(sys.argv) < 3:
@@ -220,7 +280,12 @@ if __name__ == "__main__":
         with open(sys.argv[2]) as f:
             n, d = loadkey(f.read())
 
-        decrypt(sys.stdin.buffer, sys.stdout.buffer, d, n)
+        if importlib.util.find_spec("aes"):
+            decrypt(sys.stdin.buffer, sys.stdout.buffer, d, n)
+        else:
+            print("WARNING: no AES implementation available, using RSA",
+                  file=sys.stderr)
+            decrypt_standalone(sys.stdin.buffer, sys.stdout.buffer, d, n)
 
     elif sys.argv[1] == "sign":
         if len(sys.argv) < 3:
