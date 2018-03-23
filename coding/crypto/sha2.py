@@ -1,7 +1,7 @@
 """
 usage: {0} TYPE < FILE
 
-types: 224, 256, 384, 512
+types: 224, 256, 384, 512, 512_224, 512_256
 """
 # see https://en.wikipedia.org/wiki/SHA-2
 #     http://nvlpubs.nist.gov/nistpubs/fips/nist.fips.180-4.pdf
@@ -146,10 +146,17 @@ class SHA256():
         return H
 
     @classmethod
-    def digest(cls, iio):
+    def digest(cls, iio, h=None, iv=None):
+        # h and iv are useful for SHA-512/t implementations
+        if not h:
+            h = cls.H
+        H = list(h)
+
+        if iv:
+            H = cls._chunk_digest(iv + cls._pad(len(iv)), H)
+
         count = 0
         chunk = None
-        H = list(cls.H)
 
         for chunk in iter(lambda: iio.read(cls.CHUNK_SIZE), b""):
             count += len(chunk)
@@ -268,6 +275,35 @@ class SHA384(SHA512):
     @classmethod
     def digest(cls, *args):
         return super().digest(*args)[0:384//8]
+
+
+class SHA512T(SHA512):
+    '''
+    see FIPS 180-4 sections 6.6 and 6.7
+    '''
+    @classmethod
+    def digest(cls, t, *args):
+        h = tuple(x ^ 0xa5a5a5a5a5a5a5a5 for x in cls.H)
+        iv = str.encode("SHA-512/{}".format(t))
+        return super().digest(*args, h=h, iv=iv)[0:t//8]
+
+
+class SHA512_224(SHA512T):
+    '''
+    see FIPS 180-4 sections 6.6
+    '''
+    @classmethod
+    def digest(cls, *args):
+        return super().digest(224, *args)
+
+
+class SHA512_256(SHA512T):
+    '''
+    see FIPS 180-4 sections 6.7
+    '''
+    @classmethod
+    def digest(cls, *args):
+        return super().digest(256, *args)
 
 
 # main program
