@@ -3,6 +3,7 @@
 | Directory | Description |
 |:----------|:------------|
 | [binsh](binsh) | Schell script obfuscation tool |
+| [crypto](crypto) | Toy implementations of various cryptography algorithms |
 | [symcrypt](symcrypt) | XOR-based symetric encrypting/decrypting program |
 | [cpubench](cpubench) | Simple CPU benchmark tool |
 | [data_spoofer](data_spoofer) | Discreetly send data over the internet (TCP forging and IP spoofing) |
@@ -17,4 +18,3 @@
 | [misc/shlog.sh](misc/shlog.sh) | Shell session logging tool |
 | [misc/stack_ret_overwrite.c](misc/stack_ret_overwrite.c) | Stack hacking PoC |
 | [misc/web-xpath](misc/web-xpath) | HTTP XPath extractor |
-| [misc/rsa.py](misc/rsa.py) | RSA encryption/decryption/keygen tool |
