@@ -32,11 +32,11 @@ note: the encryption algorithm is using AES and the signature one SHA-2
 
 from math import ceil
 from io import BytesIO
-from hashlib import sha256
 
 PUBKEY_FILE = "key.pub"
 PRIVKEY_FILE = "key.priv"
 AES_KEY_SIZE = 256
+SHA2_DIGEST = "SHA512_256"
 BUF_SIZE = 4096
 
 
@@ -147,6 +147,51 @@ def decrypt(iio, oio, d, n):
     aes.decrypt(iio, oio, k)
 
 
+def sign(iio, oio, d, n):
+    """
+    Returns the signature of the message from _iio_ to _oio_ using the private
+    exponent _d_, the modulus _n_ and the SHA-2 algorithm
+
+    (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
+    """
+    import sha2
+
+    hc = getattr(sha2, SHA2_DIGEST)
+    hio = BytesIO()
+    hio.write(hc.digest(iio))
+    hio.seek(0)
+
+    return encrypt(hio, oio, d, n)
+
+
+def verify(iio, s, e, n):
+    """
+    Verify the signature _s_ of the message from _iio_ using the public
+    exponent _d_, the modulus _n_ and the SHA-2 algorithm
+
+    (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
+    """
+    import sha2
+
+    # compute the expected hash
+    hc = getattr(sha2, SHA2_DIGEST)
+    exph = BytesIO()
+    exph.write(hc.digest(iio))
+    exph.seek(0)
+    exph = exph.read()
+
+    # extract (decrypt) the hash from the signature
+    sigio = BytesIO()
+    sigio.write(s)
+    sigio.seek(0)
+    sigh = BytesIO()
+    decrypt(sigio, sigh, e, n)
+    sigh.seek(0)
+    sigh = sigh.read()
+
+    return exph == sigh
+
+
 def encrypt_standalone(iio, oio, e, n):
     """
     Encrypt message from _iio_ to _oio_ using the public exponent _e_
@@ -191,17 +236,17 @@ def decrypt_standalone(iio, oio, d, n):
         oio.write(b.to_bytes(1, byteorder='little'))
 
 
-def sign(iio, oio, d, n):
+def sign_standalone(iio, oio, d, n):
     """
     Returns the signature of the message from _iio_ to _oio_ using the private
     exponent _d_, the modulus _n_ and the SHA-2 algorithm
-    """
-    # encrypt a string version of the digest since encrypt needs an UTF-8 str
-    # and since it allows to work with a modulus smaller than the digest (= to
-    # work with small primes).
-    # (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
 
-    h = sha256()
+    (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
+    """
+    import hashlib
+
+    hf = getattr(hashlib, SHA2_DIGEST.lower().split("_", 2)[0])
+    h = hf()
     for bs in iter(lambda: iio.read(BUF_SIZE), b""):
         h.update(bs)
 
@@ -212,13 +257,18 @@ def sign(iio, oio, d, n):
     return encrypt(hio, oio, d, n)
 
 
-def verify(iio, s, e, n):
+def verify_standalone(iio, s, e, n):
     """
     Verify the signature _s_ of the message from _iio_ using the public
     exponent _d_, the modulus _n_ and the SHA-2 algorithm
+
+    (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
     """
+    import hashlib
+
     # compute the expected hash
-    exph = sha256()
+    hf = getattr(hashlib, SHA2_DIGEST.lower().split("_", 2)[0])
+    exph = hf()
     for bs in iter(lambda: iio.read(BUF_SIZE), b""):
         exph.update(bs)
     exph = exph.digest()
@@ -295,7 +345,10 @@ if __name__ == "__main__":
         with open(sys.argv[2]) as f:
             n, d = loadkey(f.read())
 
-        sign(sys.stdin.buffer, sys.stdout.buffer, d, n)
+        if importlib.util.find_spec("sha2"):
+            sign(sys.stdin.buffer, sys.stdout.buffer, d, n)
+        else:
+            sign_standalone(sys.stdin.buffer, sys.stdout.buffer, d, n)
 
     elif sys.argv[1] == "verify":
         if len(sys.argv) < 4:
@@ -307,7 +360,12 @@ if __name__ == "__main__":
         with open(sys.argv[3], 'rb') as f:
             s = f.read()
 
-        if verify(sys.stdin.buffer, s, e, n):
+        if importlib.util.find_spec("sha2"):
+            signok = verify(sys.stdin.buffer, s, e, n)
+        else:
+            signok = verify_standalone(sys.stdin.buffer, s, e, n)
+
+        if signok:
             print("signature ok")
             sys.exit(0)
         else:
