@@ -40,6 +40,13 @@ SHA2_DIGEST = "SHA512_256"
 BUF_SIZE = 4096
 
 
+class BadKeyError(Exception):
+    """
+    This error is thrown when trying to decrypt using the wrong RSA key
+    """
+    pass
+
+
 def _egcd(b, n):
     """
     Returns the Euler's totient (Φ)
@@ -141,6 +148,9 @@ def decrypt(iio, oio, d, n):
     # read and decrypt the AES key using the RSA algorithm
     v = int.from_bytes(iio.read(s), byteorder='little', signed=False)
     b = pow(v, d, n)
+    # the decrypted key used for the symmetric cipher encryption is invalid
+    if _bytesize(b) != (AES_KEY_SIZE // 8):
+        raise BadKeyError
     k = b.to_bytes(AES_KEY_SIZE // 8, byteorder='little')
 
     # decrypt the message from the input IO using AES
@@ -185,7 +195,10 @@ def verify(iio, s, e, n):
     sigio.write(s)
     sigio.seek(0)
     sigh = BytesIO()
-    decrypt(sigio, sigh, e, n)
+    try:
+        decrypt(sigio, sigh, e, n)
+    except BadKeyError:
+        return False
     sigh.seek(0)
     sigh = sigh.read()
 
@@ -369,7 +382,7 @@ if __name__ == "__main__":
             print("signature ok")
             sys.exit(0)
         else:
-            print("bad signature !")
+            print("bad key !")
             sys.exit(1)
 
     else:
