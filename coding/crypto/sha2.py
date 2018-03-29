@@ -29,9 +29,17 @@ class SHA256():
         0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
     )
     ROUNDS = 64
-    CHUNK_SIZE = 64
+    BLOCK_SIZE = 64
     WSIZE = 32
     MOD = pow(2, WSIZE)
+
+    @classmethod
+    def block_size(cls):
+        return cls.BLOCK_SIZE
+
+    @classmethod
+    def digest_size(cls):
+        return cls.WSIZE
 
     @classmethod
     def _shr(cls, x, n):
@@ -94,7 +102,7 @@ class SHA256():
         '''
         see FIPS 180-4 section 5.
         '''
-        if cls.CHUNK_SIZE == 64:
+        if cls.BLOCK_SIZE == 64:
             mz = 55
             sz = 8
         else:
@@ -102,7 +110,7 @@ class SHA256():
             sz = 16
 
         return bytes([1 << 7]) \
-            + bytes([0 for _ in range((mz - s) % cls.CHUNK_SIZE)]) \
+            + bytes([0 for _ in range((mz - s) % cls.BLOCK_SIZE)]) \
             + int.to_bytes(s * 8, sz, 'big', signed=False)
 
     @classmethod
@@ -158,14 +166,14 @@ class SHA256():
         count = 0
         chunk = None
 
-        for chunk in iter(lambda: iio.read(cls.CHUNK_SIZE), b""):
+        for chunk in iter(lambda: iio.read(cls.BLOCK_SIZE), b""):
             count += len(chunk)
-            if len(chunk) < cls.CHUNK_SIZE:  # incomplete block, stop & padding
+            if len(chunk) < cls.BLOCK_SIZE:  # incomplete block, stop & padding
                 break
             H = cls._chunk_digest(chunk, H)
 
         # last block: padding
-        if (count % cls.CHUNK_SIZE) == 0:
+        if (count % cls.BLOCK_SIZE) == 0:
             chunk = cls._pad(count)
         else:
             chunk += cls._pad(count)
@@ -229,7 +237,7 @@ class SHA512(SHA256):
         0x5fcb6fab3ad6faec, 0x6c44198c4a475817
     )
     ROUNDS = 80
-    CHUNK_SIZE = 128
+    BLOCK_SIZE = 128
     WSIZE = 64
     MOD = pow(2, WSIZE)
 
