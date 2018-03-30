@@ -323,4 +323,4 @@ if __name__ == "__main__":
         sys.exit(1)
 
     cls = globals()["SHA{}".format(sys.argv[1])]
-    sys.stdout.write(cls.digest(sys.stdin.buffer).hex() + '\n')
+    print(cls.digest(sys.stdin.buffer).hex())
