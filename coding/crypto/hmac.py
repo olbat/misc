@@ -28,7 +28,7 @@ def prepare_key(key, digestcls=DEFAULT_DIGEST):
     return key
 
 
-def digest(msg, key, digestcls=DEFAULT_DIGEST):
+def digest(readable, key, digestcls=DEFAULT_DIGEST):
     """
     Generates the HMAC corresponding to _msg_ using _key_
     """

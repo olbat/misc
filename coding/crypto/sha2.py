@@ -154,7 +154,7 @@ class SHA256():
         return H
 
     @classmethod
-    def digest(cls, iio, h=None, iv=None):
+    def digest(cls, readable, h=None, iv=None):
         # h and iv are useful for SHA-512/t implementations
         if not h:
             h = cls.H
@@ -166,7 +166,7 @@ class SHA256():
         count = 0
         chunk = None
 
-        for chunk in iter(lambda: iio.read(cls.BLOCK_SIZE), b""):
+        for chunk in iter(lambda: readable.read(cls.BLOCK_SIZE), b""):
             count += len(chunk)
             if len(chunk) < cls.BLOCK_SIZE:  # incomplete block, stop & padding
                 break

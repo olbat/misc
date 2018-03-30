@@ -114,9 +114,9 @@ def genkeys(p, q):
     return [e, d, n]
 
 
-def encrypt(iio, oio, e, n):
+def encrypt(readable, writable, e, n):
     """
-    Encrypt message from _iio_ to _oio_ using the public exponent_e_,
+    Encrypt message from _readable_ to _writable_ using the public exponent_e_,
     the modulus _n_ and the AES algorithm
     """
     import aes
@@ -131,22 +131,22 @@ def encrypt(iio, oio, e, n):
     # encrypt and save it using the RSA algorithm
     b = int.from_bytes(k, byteorder='little', signed=False)
     v = pow(b, e, n)
-    oio.write(v.to_bytes(s, byteorder='little', signed=False))
+    writable.write(v.to_bytes(s, byteorder='little', signed=False))
 
     # encrypt the message from the input IO using AES
-    aes.encrypt(iio, oio, k)
+    aes.encrypt(readable, writable, k)
 
 
-def decrypt(iio, oio, d, n):
+def decrypt(readable, writable, d, n):
     """
-    Decrypt message from _iio_ to _oio_ using the private exponent _d_,
-    the modulus _n_ and the AES algorithm
+    Decrypt message from _readable_ to _writable_ using the private exponent
+    _d_, the modulus _n_ and the AES algorithm
     """
     import aes
     s = _bytesize(n)
 
     # read and decrypt the AES key using the RSA algorithm
-    v = int.from_bytes(iio.read(s), byteorder='little', signed=False)
+    v = int.from_bytes(readable.read(s), byteorder='little', signed=False)
     b = pow(v, d, n)
     # the decrypted key used for the symmetric cipher encryption is invalid
     if _bytesize(b) != (AES_KEY_SIZE // 8):
@@ -154,13 +154,13 @@ def decrypt(iio, oio, d, n):
     k = b.to_bytes(AES_KEY_SIZE // 8, byteorder='little')
 
     # decrypt the message from the input IO using AES
-    aes.decrypt(iio, oio, k)
+    aes.decrypt(readable, writable, k)
 
 
-def sign(iio, oio, d, n):
+def sign(readable, writable, d, n):
     """
-    Returns the signature of the message from _iio_ to _oio_ using the private
-    exponent _d_, the modulus _n_ and the SHA-2 algorithm
+    Returns the signature of the message from _readable_ to _writable_ using
+    the private exponent _d_, the modulus _n_ and the SHA-2 algorithm
 
     (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
     """
@@ -168,15 +168,15 @@ def sign(iio, oio, d, n):
 
     hc = getattr(sha2, SHA2_DIGEST)
     hio = BytesIO()
-    hio.write(hc.digest(iio))
+    hio.write(hc.digest(readable))
     hio.seek(0)
 
-    return encrypt(hio, oio, d, n)
+    return encrypt(hio, writable, d, n)
 
 
-def verify(iio, s, e, n):
+def verify(readable, s, e, n):
     """
-    Verify the signature _s_ of the message from _iio_ using the public
+    Verify the signature _s_ of the message from _readable_ using the public
     exponent _d_, the modulus _n_ and the SHA-2 algorithm
 
     (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
@@ -186,7 +186,7 @@ def verify(iio, s, e, n):
     # compute the expected hash
     hc = getattr(sha2, SHA2_DIGEST)
     exph = BytesIO()
-    exph.write(hc.digest(iio))
+    exph.write(hc.digest(readable))
     exph.seek(0)
     exph = exph.read()
 
@@ -205,9 +205,9 @@ def verify(iio, s, e, n):
     return exph == sigh
 
 
-def encrypt_standalone(iio, oio, e, n):
+def encrypt_standalone(readable, writable, e, n):
     """
-    Encrypt message from _iio_ to _oio_ using the public exponent _e_
+    Encrypt message from _readable_ to _writable_ using the public exponent _e_
     and the modulus _n_
 
     Note: the message is encrypted byte-per-byte using RSA instead of a
@@ -221,16 +221,16 @@ def encrypt_standalone(iio, oio, e, n):
     # handle message byte-per-byte: very spece-inefficient, time consuming
     # and insecure but easy to implement (no need for a symetric cypher, allows
     # to work with small primes/modulus) and there is no need for padding
-    for b in iter(lambda: iio.read(1), b""):
+    for b in iter(lambda: readable.read(1), b""):
         b = int.from_bytes(b, byteorder='little', signed=False)
         v = pow(b, e, n)
-        oio.write(v.to_bytes(s, byteorder='little', signed=False))
+        writable.write(v.to_bytes(s, byteorder='little', signed=False))
 
 
-def decrypt_standalone(iio, oio, d, n):
+def decrypt_standalone(readable, writable, d, n):
     """
-    Decrypt message from _iio_ to _oio_ using the private exponent _d_ and the
-    modulus _n_
+    Decrypt message from _readable_ to _writable_ using the private exponent
+    _d_ and the modulus _n_
 
     Note: the message is decrypted byte-per-byte using RSA instead of a
           symetric cypher. This is not secure and very inefficient but it
@@ -243,16 +243,16 @@ def decrypt_standalone(iio, oio, d, n):
     # handle message byte-per-byte: very spece-inefficient, time consuming
     # and insecure but easy to implement (no need for a symetric cypher, allows
     # to work with small primes/modulus) and there is no need for padding
-    for b in iter(lambda: iio.read(s), b""):
+    for b in iter(lambda: readable.read(s), b""):
         v = int.from_bytes(b, byteorder='little', signed=False)
         b = pow(v, d, n)
-        oio.write(b.to_bytes(1, byteorder='little'))
+        writable.write(b.to_bytes(1, byteorder='little'))
 
 
-def sign_standalone(iio, oio, d, n):
+def sign_standalone(readable, writable, d, n):
     """
-    Returns the signature of the message from _iio_ to _oio_ using the private
-    exponent _d_, the modulus _n_ and the SHA-2 algorithm
+    Returns the signature of the message from _readable_ to _writable_ using
+    the private exponent _d_, the modulus _n_ and the SHA-2 algorithm
 
     (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
     """
@@ -260,19 +260,19 @@ def sign_standalone(iio, oio, d, n):
 
     hf = getattr(hashlib, SHA2_DIGEST.lower().split("_", 2)[0])
     h = hf()
-    for bs in iter(lambda: iio.read(BUF_SIZE), b""):
+    for bs in iter(lambda: readable.read(BUF_SIZE), b""):
         h.update(bs)
 
     hio = BytesIO()
     hio.write(h.digest())
     hio.seek(0)
 
-    return encrypt(hio, oio, d, n)
+    return encrypt(hio, writable, d, n)
 
 
-def verify_standalone(iio, s, e, n):
+def verify_standalone(readable, s, e, n):
     """
-    Verify the signature _s_ of the message from _iio_ using the public
+    Verify the signature _s_ of the message from _readable_ using the public
     exponent _d_, the modulus _n_ and the SHA-2 algorithm
 
     (see https://en.wikipedia.org/wiki/Digital_signature#How_they_work)
@@ -282,7 +282,7 @@ def verify_standalone(iio, s, e, n):
     # compute the expected hash
     hf = getattr(hashlib, SHA2_DIGEST.lower().split("_", 2)[0])
     exph = hf()
-    for bs in iter(lambda: iio.read(BUF_SIZE), b""):
+    for bs in iter(lambda: readable.read(BUF_SIZE), b""):
         exph.update(bs)
     exph = exph.digest()
 

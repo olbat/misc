@@ -388,17 +388,17 @@ def _mix_columns_inv(block):
             ^ GF256MUL[9][i2] ^ GF256MUL[14][i3]
 
 
-def _encrypt_moo(in_io, out_io, moo):
+def _encrypt_moo(readable, writable, moo):
     '''
     Block cipher mode of operation
     (see https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation)
     '''
     if moo != "ECB":
         iv = getrandbits(16 * 8).to_bytes(16, 'little')
-        out_io.write(bytes(iv))
+        writable.write(bytes(iv))
 
     llen = None
-    for pt in iter(lambda: in_io.read(NB*NB), b""):
+    for pt in iter(lambda: readable.read(NB*NB), b""):
         llen = len(pt)
 
         if llen < NB*NB:
@@ -422,7 +422,7 @@ def _encrypt_moo(in_io, out_io, moo):
         if moo == "CBC":
             iv = [b for b in bs]
 
-        out_io.write(bs)
+        writable.write(bs)
 
     if llen == NB*NB:
         # PKCS#7 padding
@@ -430,22 +430,22 @@ def _encrypt_moo(in_io, out_io, moo):
         if (moo == "EBC") or (moo == "CBC"):
             block = _bytes2block(bytes([llen for _ in range(llen)]))
             yield block
-            out_io.write(_block2bytes(block))
+            writable.write(_block2bytes(block))
 
 
-def _decrypt_moo(in_io, out_io, moo):
+def _decrypt_moo(readable, writable, moo):
     '''
     Block cipher mode of operation
     (see https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation)
     '''
     if moo != "ECB":
-        iv = [b for b in in_io.read(NB*NB)]
+        iv = [b for b in readable.read(NB*NB)]
 
-    for ct in iter(lambda: in_io.read(NB*NB), b""):
+    for ct in iter(lambda: readable.read(NB*NB), b""):
         # FIXME: ugly hack
-        last_block = (in_io.read(1) == b"")
+        last_block = (readable.read(1) == b"")
         if not last_block:
-            in_io.seek(-1, SEEK_CUR)
+            readable.seek(-1, SEEK_CUR)
 
         if len(ct) < NB*NB:
             if (moo == "EBC") or (moo == "CBC"):
@@ -470,7 +470,7 @@ def _decrypt_moo(in_io, out_io, moo):
             else:
                 bs = bytes(bs)
 
-        out_io.write(bs)
+        writable.write(bs)
 
 
 def genkey(size):
@@ -486,7 +486,7 @@ def genkey(size):
     return key.to_bytes(size // 8, 'little', signed=False)
 
 
-def encrypt(in_io, out_io, key, moo="CBC"):
+def encrypt(readable, writable, key, moo="CBC":
     '''
     AES encryption
     (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#High-level_description_of_the_algorithm)
@@ -502,7 +502,7 @@ def encrypt(in_io, out_io, key, moo="CBC"):
     ks = len(expkey) // 16
     expkeys = [expkey[i::ks] for i in range(ks)]
 
-    for block in _encrypt_moo(in_io, out_io, moo):
+    for block in _encrypt_moo(readable, writable, moo):
         _add_round_key(block, expkeys[0])
 
         for r in range(1, rounds):
@@ -515,10 +515,10 @@ def encrypt(in_io, out_io, key, moo="CBC"):
         _shift_rows(block)
         _add_round_key(block, expkeys[rounds])
 
-        # out_io.write(_block2bytes(block))
+        # writable.write(_block2bytes(block))
 
 
-def decrypt(in_io, out_io, key, moo="CBC"):
+def decrypt(readable, writable, key, moo="CBC"):
     '''
     AES decryption
     (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#High-level_description_of_the_algorithm)
@@ -534,7 +534,7 @@ def decrypt(in_io, out_io, key, moo="CBC"):
     ks = len(expkey) // 16
     expkeys = [expkey[i::ks] for i in range(ks)]
 
-    for block in _decrypt_moo(in_io, out_io, moo):
+    for block in _decrypt_moo(readable, writable, moo):
         _add_round_key(block, expkeys[rounds])
 
         for r in range(rounds - 1, 0, -1):
@@ -547,7 +547,7 @@ def decrypt(in_io, out_io, key, moo="CBC"):
         _sub_bytes_inv(block)
         _add_round_key(block, expkeys[0])
 
-        # out_io.write(_block2bytes(block))
+        # writable.write(_block2bytes(block))
 
 
 # main program
