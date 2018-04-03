@@ -30,7 +30,7 @@ def prepare_key(key, digestcls=DEFAULT_DIGEST):
 
 def digest(readable, key, digestcls=DEFAULT_DIGEST):
     """
-    Generates the HMAC corresponding to _msg_ using _key_
+    Generates the HMAC of the message from _readable_ using _key_
     """
     # FIXME: process using an IO instead of a message
     key = prepare_key(key, digestcls=digestcls)
@@ -40,15 +40,20 @@ def digest(readable, key, digestcls=DEFAULT_DIGEST):
     kopad = bytes((b ^ 0x5c) for b in key)
 
     # 1st pass
-    io = BytesIO()
-    io.write(kipad)
-    io.write(msg)
-    io.seek(0)
-    d = digestcls.digest(io)
+    def read(size, *args, **kwargs):  # allows to prepend kipad to the stream
+        read.pos += size
+        if read.pos <= len(kipad):
+            return kipad[read.pos-size:read.pos]
+        elif ((read.pos - size) < len(kipad)) and (read.pos > len(kipad)):
+            raise ValueError  # reading overlapping data
+        else:
+            return readable.read(size, *args, **kwargs)
+    read.pos = 0
+    obj = type('', (object,), {"read": read})  # create an anon readable object
+    d = digestcls.digest(obj)
 
     # 2nd pass
-    io.seek(0)
-    io.truncate(0)
+    io = BytesIO()
     io.write(kopad)
     io.write(d)
     io.seek(0)
@@ -72,4 +77,4 @@ if __name__ == "__main__":
     else:
         digestcls = DEFAULT_DIGEST
 
-    print(digest(sys.stdin.buffer.read(), k, digestcls=digestcls).hex())
+    print(digest(sys.stdin.buffer, k, digestcls=digestcls).hex())
