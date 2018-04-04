@@ -388,13 +388,14 @@ def _mix_columns_inv(block):
             ^ GF256MUL[9][i2] ^ GF256MUL[14][i3]
 
 
-def _encrypt_moo(readable, writable, moo):
+def _encrypt_moo(readable, writable, moo, iv=None):
     '''
     Block cipher mode of operation
     (see https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation)
     '''
     if moo != "ECB":
-        iv = getrandbits(16 * 8).to_bytes(16, 'little')
+        if not iv:
+            iv = getrandbits(16 * 8).to_bytes(16, 'little')
         writable.write(bytes(iv))
 
     llen = None
@@ -486,7 +487,7 @@ def genkey(size):
     return key.to_bytes(size // 8, 'little', signed=False)
 
 
-def encrypt(readable, writable, key, moo="CBC":
+def encrypt(readable, writable, key, moo="CBC", iv=None):
     '''
     AES encryption
     (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#High-level_description_of_the_algorithm)
@@ -502,7 +503,7 @@ def encrypt(readable, writable, key, moo="CBC":
     ks = len(expkey) // 16
     expkeys = [expkey[i::ks] for i in range(ks)]
 
-    for block in _encrypt_moo(readable, writable, moo):
+    for block in _encrypt_moo(readable, writable, moo=moo, iv=iv):
         _add_round_key(block, expkeys[0])
 
         for r in range(1, rounds):
