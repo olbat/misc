@@ -29,6 +29,7 @@ note: the encryption algorithm is using AES and the signature one SHA-2
 """
 # see https://en.wikipedia.org/wiki/RSA_(cryptosystem)
 #     https://www.emc.com/collateral/white-papers/h11300-pkcs-1v2-2-rsa-cryptography-standard-wp.pdf
+#     https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.186-4.pdf
 
 from math import ceil
 from io import BytesIO

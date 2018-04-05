@@ -3,6 +3,7 @@ usage: {0} KEY_FILE [HASH_TYPE] < FILE
 """
 # see https://en.wikipedia.org/wiki/HMAC
 #     http://www.ietf.org/rfc/rfc2104.txt
+#     https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.198-1.pdf
 
 from io import BytesIO
 import sha2
@@ -14,7 +15,7 @@ def prepare_key(key, digestcls=DEFAULT_DIGEST):
     """
     Generates a key of a specified size using the input key
 
-    (see RFC 2104 section 2)
+    (see RFC 2104 section 2, FIPS-198-1 section 4)
     """
     if len(key) > digestcls.block_size():
         io = BytesIO()
@@ -31,6 +32,8 @@ def prepare_key(key, digestcls=DEFAULT_DIGEST):
 def digest(readable, key, digestcls=DEFAULT_DIGEST):
     """
     Generates the HMAC of the message from _readable_ using _key_
+
+    (see RFC 2104 section 2, FIPS-198-1 section 4
     """
     # FIXME: process using an IO instead of a message
     key = prepare_key(key, digestcls=digestcls)
