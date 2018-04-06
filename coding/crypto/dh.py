@@ -1,12 +1,42 @@
 """
-usage: {0} ?
-"""
-from collections import namedtuple
+usage: {0} <mode> [<options>]
 
-DHGroup = namedtuple('DHGroup', ['g', 'p'])
+modes:
+  list-groups
+  genkeys   GROUP SIZE > KEYS
+  gensecret KEYS OTHERS_KEYS > SECRET
+
+examples:
+  # list the available DH groups
+  python {0} list-groups
+
+  # generate a first key pair
+  python {0} genkeys 8 256 > keys1
+
+  # generate a second key pair
+  python {0} genkeys 8 256 > keys2
+
+  # generate the shared secret
+  python {0} gensecret keys1 keys2
+
+  # extra test
+  cmp <(python {0} gensecret keys1 keys2) \\
+      <(python {0} gensecret keys2 keys1)
+"""
+# see https://en.wikipedia.org/wiki/Diffie%E2%80%93Hellman_key_exchange
+#     http://people.csail.mit.edu/vinodv/COURSES/MAT302-S13/MerklePuzzlepaper.pdf
+#     http://www.ietf.org/rfc/rfc3526.txt
+#     http://www.ietf.org/rfc/rfc5114.txt
+
+
+from collections import namedtuple
+from random import getrandbits
+
+DHGroup = namedtuple('DHGroup', ['g', 'p', 'desc'])
 
 GROUPS = (
-    DHGroup(  # 1536-bit MODP Group (RFC 3526)
+    DHGroup(
+        desc='1536-bit MODP Group (RFC 3526)',
         g=2,
         p=int(
             "FFFFFFFF" "FFFFFFFF" "C90FDAA2" "2168C234" "C4C6628B" "80DC1CD1"
@@ -20,7 +50,8 @@ GROUPS = (
             16
         )
     ),
-    DHGroup(  # 2048-bit MODP Group (RFC 3526)
+    DHGroup(
+        desc='2048-bit MODP Group (RFC 3526)',
         g=2,
         p=int(
             "FFFFFFFF" "FFFFFFFF" "C90FDAA2" "2168C234" "C4C6628B" "80DC1CD1"
@@ -37,7 +68,8 @@ GROUPS = (
             16
         )
     ),
-    DHGroup(  # 3072-bit MODP Group (RFC 3526)
+    DHGroup(
+        desc='3072-bit MODP Group (RFC 3526)',
         g=2,
         p=int(
             "FFFFFFFF" "FFFFFFFF" "C90FDAA2" "2168C234" "C4C6628B" "80DC1CD1"
@@ -59,7 +91,8 @@ GROUPS = (
             16
         )
     ),
-    DHGroup(  # 4096-bit MODP Group (RFC 3526)
+    DHGroup(
+        desc='4096-bit MODP Group (RFC 3526)',
         g=2,
         p=int(
             "FFFFFFFF" "FFFFFFFF" "C90FDAA2" "2168C234" "C4C6628B" "80DC1CD1"
@@ -87,7 +120,8 @@ GROUPS = (
             16
         )
     ),
-    DHGroup(  # 6144-bit MODP Group (RFC 3526)
+    DHGroup(
+        desc='6144-bit MODP Group (RFC 3526)',
         g=2,
         p=int(
             "FFFFFFFF" "FFFFFFFF" "C90FDAA2" "2168C234" "C4C6628B" "80DC1CD1"
@@ -125,7 +159,8 @@ GROUPS = (
             16
         )
     ),
-    DHGroup(  # 8192-bit MODP Group (RFC 3526)
+    DHGroup(
+        desc='8192-bit MODP Group (RFC 3526)',
         g=2,
         p=int(
             "FFFFFFFF" "FFFFFFFF" "C90FDAA2" "2168C234" "C4C6628B" "80DC1CD1"
@@ -174,7 +209,8 @@ GROUPS = (
             16
         )
     ),
-    DHGroup(  # 1024-bit MODP Group with 160-bit Prime Order Subgroup (RFC 5114)
+    DHGroup(
+        desc='1024-bit MODP Group with 160-bit Prime Order Subgroup (RFC 5114)',
         g=int(
             "A4D1CBD5" "C3FD3412" "6765A442" "EFB99905" "F8104DD2" "58AC507F"
             "D6406CFF" "14266D31" "266FEA1E" "5C41564B" "777E690F" "5504F213"
@@ -194,7 +230,8 @@ GROUPS = (
             16
         )
     ),
-    DHGroup(  # 2048-bit MODP Group with 224-bit Prime Order Subgroup (RFC 5114)
+    DHGroup(
+        desc='2048-bit MODP Group with 224-bit Prime Order Subgroup (RFC 5114)',
         g=int(
             "AC4032EF" "4F2D9AE3" "9DF30B5C" "8FFDAC50" "6CDEBE7B" "89998CAF"
             "74866A08" "CFE4FFE3" "A6824A4E" "10B9A6F0" "DD921F01" "A70C4AFA"
@@ -224,7 +261,8 @@ GROUPS = (
             16
         )
     ),
-    DHGroup(  # 2048-bit MODP Group with 256-bit Prime Order Subgroup (RFC 5114)
+    DHGroup(
+        desc='2048-bit MODP Group with 256-bit Prime Order Subgroup (RFC 5114)',
         g=int(
             "3FB32C9B" "73134D0B" "2E775066" "60EDBD48" "4CA7B18F" "21EF2054"
             "07F4793A" "1A0BA125" "10DBC150" "77BE463F" "FF4FED4A" "AC0BB555"
@@ -255,3 +293,87 @@ GROUPS = (
         )
     ),
 )
+
+
+def generate_private_key(size):
+    '''
+    Generate a private key of _size_ bits
+    '''
+    return getrandbits(size)
+
+
+def generate_public_key(g, p, private_key):
+    '''
+    Generate the public key corresponding to a private one using a generator _g_
+    and a prime _p_
+
+    see https://en.wikipedia.org/wiki/Diffie%E2%80%93Hellman_key_exchange
+    '''
+    return pow(g, private_key, p)
+
+
+def check_public_key(p, public_key):
+    '''
+    Check a public key (DDH asumption) using a prime _p_
+
+    see https://en.wikipedia.org/wiki/Decisional_Diffie%E2%80%93Hellman_assumption
+    '''
+    if (public_key > 2) and (public_key < p - 1):
+        if pow(public_key, (p - 1) // 2, p) == 1:
+            return True
+    return False
+
+
+def generate_shared_secret(p, private_key, other_public_key, check=True):
+    '''
+    Generate the shared secret following the Diffie-Hellman-Merkle key exchange
+
+    see https://en.wikipedia.org/wiki/Diffie%E2%80%93Hellman_key_exchange
+    '''
+    if check and not check_public_key(p, other_public_key):
+        raise ValueError
+    return pow(other_public_key, private_key, p)
+
+
+# main program
+if __name__ == "__main__":
+    import sys
+    from math import ceil
+
+    if len(sys.argv) < 2:
+        print(__doc__.format(sys.argv[0]), file=sys.stderr)
+        sys.exit(1)
+
+    if sys.argv[1] == "list-groups":
+        print(*["[{}] {}".format(i, g.desc) for i, g in enumerate(GROUPS)],
+              sep='\n')
+
+    elif sys.argv[1] == "genkeys":
+        if len(sys.argv) < 4:
+            print(__doc__.format(sys.argv[0]), file=sys.stderr)
+            sys.exit(1)
+
+        dhgroup = GROUPS[int(sys.argv[2])]
+        priv_key = generate_private_key(int(sys.argv[3]))
+        pub_key = generate_public_key(dhgroup.g, dhgroup.p, priv_key)
+
+        print(dhgroup.g, dhgroup.p, priv_key, pub_key)
+
+    elif sys.argv[1] == "gensecret":
+        if len(sys.argv) < 4:
+            print(__doc__.format(sys.argv[0]), file=sys.stderr)
+            sys.exit(1)
+
+        with open(sys.argv[2]) as f:
+            _, p, priv_key, _ = f.readline().split()
+
+        with open(sys.argv[3]) as f:
+            _, _, _, pub_key = f.readline().split()
+
+        secret = generate_shared_secret(int(p), int(priv_key), int(pub_key))
+        secret = secret.to_bytes(ceil(secret.bit_length() / 8), 'little')
+        sys.stdout.buffer.write(secret)
+
+    else:
+        print(__doc__.format(sys.argv[0]), file=sys.stderr)
+        sys.exit(1)
