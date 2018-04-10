@@ -15,9 +15,11 @@ examples:
 """
 # see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard
 #     https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.197.pdf
+#     https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38a.pdf
 
 from random import getrandbits
 from io import SEEK_CUR
+from enum import Enum
 
 # Types of AES keys
 # (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard,
@@ -236,6 +238,22 @@ GF256MUL = {
 }
 
 
+class MoO(Enum):
+    '''
+    Block cipher mode of operation
+
+    (see https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation)
+    '''
+    ECB = 0
+    CBC = 1
+    # TODO: add support for other modes
+    # PCBC = 2
+    # CFB = 3
+    # OFB = 4
+    # CTR = 5
+
+
+
 def _bytes2block(bs, dim=NB):
     '''
     Bytes to block (column-major order matrix of bytes) utility function
@@ -393,9 +411,12 @@ def _encrypt_moo(readable, writable, moo, iv=None):
     Block cipher mode of operation
     (see https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation)
     '''
-    if moo != "ECB":
+    if moo not in MoO:
+        raise ValueError
+
+    if moo != MoO.ECB:
         if not iv:
-            iv = getrandbits(16 * 8).to_bytes(16, 'little')
+            iv = getrandbits(16 * 8).to_bytes(16, 'little', signed=False)
         writable.write(bytes(iv))
 
     llen = None
@@ -405,11 +426,11 @@ def _encrypt_moo(readable, writable, moo, iv=None):
         if llen < NB*NB:
             # PKCS#7 padding
             # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
-            if (moo == "EBC") or (moo == "CBC"):
+            if (moo == MoO.ECB) or (moo == MoO.CBC):
                 pn = (NB*NB) - llen
                 pt += bytes([pn for _ in range(pn)])
 
-        if moo == "CBC":
+        if moo == MoO.CBC:
             pt = [b for b in pt]
             for i in range(NB*NB):
                 pt[i] ^= iv[i]
@@ -420,7 +441,7 @@ def _encrypt_moo(readable, writable, moo, iv=None):
         yield block
         bs = _block2bytes(block)
 
-        if moo == "CBC":
+        if moo == MoO.CBC:
             iv = [b for b in bs]
 
         writable.write(bs)
@@ -428,7 +449,7 @@ def _encrypt_moo(readable, writable, moo, iv=None):
     if llen == NB*NB:
         # PKCS#7 padding
         # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
-        if (moo == "EBC") or (moo == "CBC"):
+        if (moo == MoO.ECB) or (moo == MoO.CBC):
             block = _bytes2block(bytes([llen for _ in range(llen)]))
             yield block
             writable.write(_block2bytes(block))
@@ -439,7 +460,10 @@ def _decrypt_moo(readable, writable, moo):
     Block cipher mode of operation
     (see https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation)
     '''
-    if moo != "ECB":
+    if moo not in MoO:
+        raise ValueError
+
+    if moo != MoO.ECB:
         iv = [b for b in readable.read(NB*NB)]
 
     for ct in iter(lambda: readable.read(NB*NB), b""):
@@ -449,7 +473,7 @@ def _decrypt_moo(readable, writable, moo):
             readable.seek(-1, SEEK_CUR)
 
         if len(ct) < NB*NB:
-            if (moo == "EBC") or (moo == "CBC"):
+            if (moo == MoO.ECB) or (moo == MoO.CBC):
                 raise ValueError
 
         block = _bytes2block(ct)
@@ -457,7 +481,7 @@ def _decrypt_moo(readable, writable, moo):
         yield block
         bs = _block2bytes(block)
 
-        if moo == "CBC":
+        if moo == MoO.CBC:
             bs = [b for b in bs]
             for i in range(NB*NB):
                 bs[i] ^= iv[i]
@@ -465,7 +489,7 @@ def _decrypt_moo(readable, writable, moo):
 
         # PKCS#7 padding
         # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
-        if (moo == "EBC") or (moo == "CBC"):
+        if (moo == MoO.ECB) or (moo == MoO.CBC):
             if last_block:
                 bs = bytes(bs[:-bs[-1]])
             else:
@@ -487,7 +511,7 @@ def genkey(size):
     return key.to_bytes(size // 8, 'little', signed=False)
 
 
-def encrypt(readable, writable, key, moo="CBC", iv=None):
+def encrypt(readable, writable, key, moo=MoO.CBC, iv=None):
     '''
     AES encryption
     (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#High-level_description_of_the_algorithm)
@@ -519,7 +543,7 @@ def encrypt(readable, writable, key, moo="CBC", iv=None):
         # writable.write(_block2bytes(block))
 
 
-def decrypt(readable, writable, key, moo="CBC"):
+def decrypt(readable, writable, key, moo=MoO.CBC):
     '''
     AES decryption
     (see https://en.wikipedia.org/wiki/Advanced_Encryption_Standard#High-level_description_of_the_algorithm)
