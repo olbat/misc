@@ -30,6 +30,8 @@ class SHA256():
     )
     ROUNDS = 64
     BLOCK_SIZE = 64
+    PAD_INT_SIZE = 8
+    PAD_MAX_ZEROS = 56  # 448 bits
     WSIZE = 32
     MOD = pow(2, WSIZE)
 
@@ -102,16 +104,22 @@ class SHA256():
         '''
         see FIPS 180-4 section 5.
         '''
-        if cls.BLOCK_SIZE == 64:
-            mz = 55
-            sz = 8
-        else:
-            mz = 111
-            sz = 16
+        # 1 byte for the one bit pad
+        nz = (cls.PAD_MAX_ZEROS - s - 1) % cls.BLOCK_SIZE
 
         return bytes([1 << 7]) \
-            + bytes([0 for _ in range((mz - s) % cls.BLOCK_SIZE)]) \
-            + int.to_bytes(s * 8, sz, 'big', signed=False)
+            + bytes([0 for _ in range(nz)]) \
+            + int.to_bytes(s * 8, cls.PAD_INT_SIZE, 'big', signed=False)
+
+    @classmethod
+    def _zero_pad(cls, s):
+        '''
+        Extra padding function used when the padded block is too big to be able
+        to store the length of the message (>= 448 bits for SHA224 and SHA256,
+        >= 896 bits for SHA-384, SHA-512, SHA-512/224 and SHA-512/256)
+        '''
+        return bytes([0 for _ in range(cls.PAD_MAX_ZEROS)]) \
+            + int.to_bytes(s * 8, cls.PAD_INT_SIZE, 'big', signed=False)
 
     @classmethod
     def _chunk_digest(cls, chunk, H):
@@ -172,11 +180,18 @@ class SHA256():
                 break
             H = cls._chunk_digest(chunk, H)
 
+        dfsz = (cls.BLOCK_SIZE - len(chunk))
+
         # last block: padding
         if (count % cls.BLOCK_SIZE) == 0:
             chunk = cls._pad(count)
+        elif dfsz <= cls.PAD_INT_SIZE:
+            chunk += cls._pad(count)
+            H = cls._chunk_digest(chunk, H)
+            chunk = cls._zero_pad(count)  # extra round
         else:
             chunk += cls._pad(count)
+
         H = cls._chunk_digest(chunk, H)
 
         # convert array of numbers to bytes
@@ -238,6 +253,8 @@ class SHA512(SHA256):
     )
     ROUNDS = 80
     BLOCK_SIZE = 128
+    PAD_INT_SIZE = 16
+    PAD_MAX_ZEROS = 112  # 896 bits
     WSIZE = 64
     MOD = pow(2, WSIZE)
 
