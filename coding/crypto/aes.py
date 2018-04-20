@@ -253,7 +253,6 @@ class MoO(Enum):
     # CTR = 5
 
 
-
 def _bytes2block(bs, dim=NB):
     '''
     Bytes to block (column-major order matrix of bytes) utility function
@@ -294,8 +293,6 @@ def _key_expansion(key, keycfg):
     (see https://en.wikipedia.org/wiki/Rijndael_key_schedule)
     '''
     expkeysize = keycfg["expkey_size"]
-    # key = [bytes([b]) for b in key]
-    # expkey = [b''] * expkeysize
     key = [b for b in key]
     expkey = [0] * expkeysize
 
@@ -525,7 +522,7 @@ def encrypt(readable, writable, key, moo=MoO.CBC, iv=None):
 
     # split the expansion key in chunks of size 16 to speedup _add_round_key
     ks = len(expkey) // 16
-    expkeys = [expkey[i::ks] for i in range(ks)]
+    expkeys = [expkey[i*NB*NB:(i+1)*NB*NB] for i in range(ks)]
 
     for block in _encrypt_moo(readable, writable, moo=moo, iv=iv):
         _add_round_key(block, expkeys[0])
@@ -557,7 +554,7 @@ def decrypt(readable, writable, key, moo=MoO.CBC):
 
     # split the expansion key in chunks of size 16 to speedup _add_round_key
     ks = len(expkey) // 16
-    expkeys = [expkey[i::ks] for i in range(ks)]
+    expkeys = [expkey[i*NB*NB:(i+1)*NB*NB] for i in range(ks)]
 
     for block in _decrypt_moo(readable, writable, moo):
         _add_round_key(block, expkeys[rounds])
