@@ -478,7 +478,7 @@ def _decrypt_moo(readable, writable, moo):
         yield block
         bs = _block2bytes(block)
 
-        if moo == MoO.CBC:
+        if (moo == MoO.CBC) and (not last_block):
             bs = [b for b in bs]
             for i in range(NB*NB):
                 bs[i] ^= iv[i]
@@ -486,11 +486,10 @@ def _decrypt_moo(readable, writable, moo):
 
         # PKCS#7 padding
         # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
-        if (moo == MoO.ECB) or (moo == MoO.CBC):
-            if last_block:
-                bs = bytes(bs[:-bs[-1]])
-            else:
-                bs = bytes(bs)
+        if ((moo == MoO.ECB) or (moo == MoO.CBC)) and last_block:
+            bs = bytes(bs[:-int(bs[-1])])
+        else:
+            bs = bytes(bs)
 
         writable.write(bs)
 
