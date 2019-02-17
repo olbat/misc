@@ -551,11 +551,11 @@ $ git revert COMMIT1 COMMIT2 .. COMMITn
 $ git push origin
 ```
 
-* Override a remote branch with a local one (TO AVOID)
+* Override a remote branch with a local one
 ```bash
 $ git rebase -i ... # rewrite history
 $ git push -f origin branch
-# Prepare yourself to be punched by co-workers
+# (to avoid in shared branches)
 ```
 
 ---
@@ -1372,14 +1372,15 @@ xKÊÉOR°dp,O-ÎÏMUä,S
 * _deflate_ (zip,gzip,zlib,...) decompressed content
 ```bash
 $ cat .git/objects/6d/4ed2c98c4fbe835280634af0cbddefffaf7ee6 | \
-  ruby -r zlib -e "p Zlib::Inflate.inflate(STDIN.read)"
-"blob 9\x00Awesome!\n"
+  openssl zlib -d | od -vtc -tx1
+0000000   b   l   o   b       9  \0   A   w   e   s   o   m   e   !  \n
+         62  6c  6f  62  20  39  00  41  77  65  73  6f  6d  65  21  0a
 ```
 
 * Calculation of the SHA1 hash associated of the object
 ```bash
-$ ruby -r digest/sha1 -e 'p Digest::SHA1.hexdigest("blob 9\x00Awesome!\n")'
-"6d4ed2c98c4fbe835280634af0cbddefffaf7ee6"
+$ printf %b 'blob 9\0Awesome!\n' | sha1sum
+6d4ed2c98c4fbe835280634af0cbddefffaf7ee6 *-
 ```
 
 ---
