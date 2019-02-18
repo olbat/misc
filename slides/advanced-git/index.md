@@ -555,7 +555,7 @@ $ git push origin
 ```bash
 $ git rebase -i ... # rewrite history
 $ git push -f origin branch
-# (to avoid in shared branches)
+# (to avoid with shared branches)
 ```
 
 ---
@@ -632,7 +632,7 @@ $ git checkout --orphan newbranch
 $ git rm -r --cached .
 ```
 
-* Clean: remove every local branches that has been merged
+* Clean: remove every local branch that has been merged
 ```bash
 git branch --merged master | grep -v '^\*' | xargs -n 1 git branch -d
 ```
