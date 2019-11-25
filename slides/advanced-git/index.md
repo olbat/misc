@@ -12,11 +12,12 @@ class: middle
 
 # About
 
-This slides are using resources from the [Pro Git](https://git-scm.com/book) book [isbn:1430218339] which is licensed under the Creative Commons v3.0 (by-nc-sa) license.
+This slides are using resources from the [Pro Git](https://git-scm.com/book) book [isbn:1430218339]  
+which is licensed under the Creative Commons v3.0 (by-nc-sa) license.
 
 The sources of the book can be found at https://github.com/progit/progit2 .
 
-The sources of the slides can be found at https://github.com/olbat/misc/tree/master/slides/advanced-git .
+The sources of this slides can be found at https://github.com/olbat/misc/tree/HEAD/slides/advanced-git .
 
 ---
 
@@ -44,9 +45,9 @@ class: middle
 * Main goals
   * Speed
   * Simple design
-  * Strong support for non-linear development (thousands of branches)
-  * Fully distributed
-  * Ability to handle large projects like the Linux kernel efficiently (speed and data size)
+  * Data integrity
+  * Support for distributed workflows
+  * Support for non-linear development
 
 ---
 
@@ -463,12 +464,17 @@ class: center, middle
 
 # Download and upload changes
 
-* Push several new branches on the remote
+* Push the current branch to the remote branch with the same name
 ```bash
-$ git push origin branchname name:othername HEAD:name
+$ git push origin HEAD
 ```
 
-* Delete a branch from the remote
+* Push several new branches to the remote
+```bash
+$ git push origin branchname name:othername HEAD:name HEAD
+```
+
+* Delete a branch on the remote
 ```bash
 $ git push origin :branchname
 ```
@@ -478,9 +484,9 @@ $ git push origin :branchname
 $ git fetch origin -p # --prune
 ```
 
-* Fetch changes from a branch in a specific branch
+* Fetch changes from a remote branch in a specific local branch
 ```bash
-$ git fetch origin master:updated_master
+$ git fetch origin master:latest_master
 ```
 
 [Pro Git, [chapter 3.5](http://git-scm.com/book/en/v2/Git-Branching-Remote-Branches)]
@@ -548,14 +554,13 @@ refs/heads/master -----------------------*====*====*
 * Revert commits (applies the reverse diffs)
 ```bash
 $ git revert COMMIT1 COMMIT2 .. COMMITn
-$ git push origin
+$ git push origin HEAD
 ```
 
 * Override a remote branch with a local one
 ```bash
 $ git rebase -i ... # rewrite history
-$ git push -f origin branch
-# (to avoid with shared branches)
+$ git push --force-with-lease origin HEAD # (to avoid with shared branches)
 ```
 
 ---
