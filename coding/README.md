@@ -8,6 +8,7 @@
 | [cpubench](cpubench) | Simple CPU benchmark tool |
 | [data_spoofer](data_spoofer) | Discreetly send data over the internet (TCP forging and IP spoofing) |
 | [realtimeclock](realtimeclock) | GNU/Linux kernel module that read the current time from the CMOS |
+| [jitpoc](jitpoc) | Very minimal JIT compilation PoC |
 | [apidoc](apidoc) | REST API documentation generator |
 | [ruby-benchs](ruby-benchs) | Small dummy benchs on Ruby standard lib components |
 | [misc/fork_chain.rb](misc/fork_chain.rb) | A fork+pipe chain PoC |
