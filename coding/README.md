@@ -4,6 +4,7 @@
 |:----------|:------------|
 | [binsh](binsh) | Schell script obfuscation tool |
 | [crypto](crypto) | Toy implementations of various cryptography algorithms |
+| [rgrep](rgrep) | Simplified Rust implementation of the grep utility |
 | [symcrypt](symcrypt) | XOR-based symetric encrypting/decrypting program |
 | [cpubench](cpubench) | Simple CPU benchmark tool |
 | [data_spoofer](data_spoofer) | Discreetly send data over the internet (TCP forging and IP spoofing) |
