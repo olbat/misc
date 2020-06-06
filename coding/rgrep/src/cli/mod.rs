@@ -14,12 +14,13 @@ pub fn run() -> Result<bool, Box<dyn error::Error>> {
 
     let paths = args.paths.iter().map(String::as_str);
 
-    search::search(&args.pattern, paths, &args.options)
+    let results_by_file = search::search(&args.pattern, paths, &args.options);
 
-    // TODO: finish implementation
-    //if args.options.quiet {
-    //} else {
-    //    // TODO: use closure
-    //    results::print_results(search::search(&args.pattern, paths, &args.options))
-    //}
+    let mut any_match = false;
+
+    for (filepath, results) in results_by_file {
+        any_match |= results::print_results(filepath.as_ref(), results, &args.options);
+    }
+
+    Ok(any_match)
 }
