@@ -7,7 +7,7 @@ use crate::search;
 mod args;
 pub use args::ArgError;
 pub use args::Args;
-mod results;
+mod print;
 
 pub fn run() -> Result<bool, Box<dyn error::Error>> {
     let args: Args = Args::try_from(env::args())?;
@@ -16,5 +16,5 @@ pub fn run() -> Result<bool, Box<dyn error::Error>> {
 
     let results = search::search(&args.pattern, paths, &args.options);
 
-    Ok(results::print_results(results, &args.options))
+    Ok(print::print_results(results, &args.options))
 }

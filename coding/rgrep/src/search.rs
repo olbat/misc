@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::Options;
 
-pub type Match = (usize, std::io::Result<String>);
+pub type Match = (usize, io::Result<String>);
 
 // TODO: find a way to simplify the return type to make it easy to re-use
 pub fn search<'a, P: AsRef<Path> + 'a>(
