@@ -1,37 +1,54 @@
-use std::error::Error;
+use std::io;
 use std::path::Path;
 
 use crate::options;
 use crate::search;
 
-pub fn print_results<'a>(
-    filepath: &'a Path,
-    results: Result<impl Iterator<Item = search::Match>, Box<dyn Error>>,
+pub fn print_results<'a, P: AsRef<Path> + 'a>(
+    results: impl Iterator<Item = (P, io::Result<impl Iterator<Item = search::Match> + 'a>)>,
     opts: &'a options::Options,
 ) -> bool {
     let mut any_match = false;
 
-    match results {
-        Ok(matches) => {
-            for (line_no, line) in matches {
-                any_match |= true;
-                print_result(filepath, line_no, line, opts);
-            }
+    for (filepath, result) in results {
+        let filepath = filepath.as_ref();
+        match result {
+            Ok(matches) => any_match |= print_matches(filepath, matches, opts),
+            Err(error) => print_error(filepath, error),
         }
-        Err(e) => print_error(filepath, e),
+    }
+
+    any_match
+}
+
+pub fn print_matches<'a>(
+    filepath: &'a Path,
+    matches: impl Iterator<Item = search::Match>,
+    opts: &'a options::Options,
+) -> bool {
+    let mut any_match = false;
+
+    for (line_no, lmatch) in matches {
+        match lmatch {
+            Ok(line) => {
+                any_match |= true;
+                print_match(filepath, line_no, line, opts);
+            }
+            Err(error) => print_error(filepath, error),
+        }
     }
 
     any_match
 }
 
 #[inline]
-fn print_result<'a>(filepath: &'a Path, line_no: usize, line: String, opts: &'a options::Options) {
+fn print_match<'a>(filepath: &'a Path, line_no: usize, line: String, opts: &'a options::Options) {
     if !opts.quiet {
-        println!("{}:{}: {}", filepath.display(), line_no, line);
+        println!("{}:{}:{}", filepath.display(), line_no, line);
     }
 }
 
 #[inline]
-fn print_error<'a>(filepath: &'a Path, err: Box<dyn Error>) {
-    eprintln!("{}: error, {}", filepath.display(), err);
+fn print_error<'a>(filepath: &'a Path, error: io::Error) {
+    eprintln!("!{}: {}", filepath.display(), error);
 }
