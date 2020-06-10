@@ -6,19 +6,31 @@ use crate::Options;
 
 pub type Match = (usize, io::Result<String>);
 
-// TODO: find a way to simplify the return type to make it easy to re-use
 pub fn search<'a, P: AsRef<Path> + 'a>(
     pattern: &'a str,
-    paths: impl Iterator<Item = P>,
+    paths: impl Iterator<Item = P> + 'a,
+    opts: &'a Options,
+) -> impl Iterator<Item = (P, io::Result<impl Iterator<Item = Match> + 'a>)> {
+    search_paths(pattern, paths.map(|p| (p, None)), opts)
+}
+
+// TODO: find a way to simplify the return type to make it easy to re-use
+pub fn search_paths<'a, P: AsRef<Path> + 'a>(
+    pattern: &'a str,
+    paths: impl Iterator<Item = (P, Option<io::Error>)>,
     opts: &'a Options,
 ) -> impl Iterator<Item = (P, io::Result<impl Iterator<Item = Match> + 'a>)> {
     // TODO: search different files in parallel
     // TODO: allow searching in directories (use a stack to avoid too many nested recursive calls?)
-    paths.into_iter().map(move |p| {
-        let file = File::open(p.as_ref());
-        match file {
-            Ok(f) => (p, io::Result::Ok(search_file(pattern, f, &opts))),
-            Err(e) => (p, io::Result::Err(e)),
+    paths.into_iter().map(move |(p, e)| {
+        if let Some(err) = e {
+            (p, io::Result::Err(err))
+        } else {
+            let file = File::open(p.as_ref());
+            match file {
+                Ok(f) => (p, io::Result::Ok(search_file(pattern, f, &opts))),
+                Err(e) => (p, io::Result::Err(e)),
+            }
         }
     })
 }

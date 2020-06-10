@@ -20,7 +20,7 @@ impl WalkPaths {
         }
     }
 
-    fn walkdir(&mut self, dir: PathBuf) -> io::Result<()> {
+    fn walkdir(&mut self, dir: &Path) -> io::Result<()> {
         // depth first path traversal
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
@@ -31,19 +31,20 @@ impl WalkPaths {
 }
 
 impl Iterator for WalkPaths {
-    type Item = io::Result<PathBuf>;
+    type Item = (PathBuf, Option<io::Error>);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.stack.pop() {
                 Some(path) => {
                     if path.is_dir() {
-                        match self.walkdir(path) {
+                        match self.walkdir(&path) {
                             Ok(_) => continue,
-                            Err(e) => break Some(Err(e)),
+                            Err(e) => break Some((path, Some(e))),
                         }
                     } else {
-                        break Some(Ok(path));
+                        // TODO: exclude special files (devices, fifos, ...)
+                        break Some((path, None));
                     }
                 }
                 None => break None,
