@@ -1,5 +1,7 @@
 use std::fs;
 use std::io;
+#[cfg(unix)]
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 
 pub struct WalkPaths {
@@ -28,6 +30,43 @@ impl WalkPaths {
         }
         Ok(())
     }
+
+    #[inline]
+    fn check_path(&self, path: &PathBuf) -> Option<io::Error> {
+        if cfg!(unix) {
+            match path.metadata() {
+                Ok(metadata) => {
+                    let file_type = metadata.file_type();
+                    if file_type.is_char_device() {
+                        Some(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "cannot process char device",
+                        ))
+                    } else if file_type.is_block_device() {
+                        Some(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "cannot process block device",
+                        ))
+                    } else if file_type.is_fifo() {
+                        Some(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "cannot process fifo",
+                        ))
+                    } else if file_type.is_socket() {
+                        Some(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "cannot process socket",
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                Err(e) => Some(e),
+            }
+        } else {
+            None
+        }
+    }
 }
 
 impl Iterator for WalkPaths {
@@ -40,11 +79,11 @@ impl Iterator for WalkPaths {
                     if path.is_dir() {
                         match self.walkdir(&path) {
                             Ok(_) => continue,
-                            Err(e) => break Some((path, Some(e))),
+                            Err(err) => break Some((path, Some(err))),
                         }
                     } else {
-                        // TODO: exclude special files (devices, fifos, ...)
-                        break Some((path, None));
+                        let err = self.check_path(&path);
+                        break Some((path, err));
                     }
                 }
                 None => break None,
