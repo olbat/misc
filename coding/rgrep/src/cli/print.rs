@@ -49,6 +49,6 @@ fn print_match<'a>(filepath: &'a Path, line_no: usize, line: String, opts: &'a o
 }
 
 #[inline]
-fn print_error<'a>(filepath: &'a Path, error: io::Error) {
+fn print_error(filepath: &Path, error: io::Error) {
     eprintln!("!{}: {}", filepath.display(), error);
 }
