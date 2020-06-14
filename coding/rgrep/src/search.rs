@@ -1,3 +1,6 @@
+#[cfg(feature = "simd")]
+extern crate twoway;
+
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::Path;
@@ -56,9 +59,21 @@ pub fn search_file<'a>(
             }
         })
         .filter(move |res| match res {
-            Ok(line) => line.contains(pattern),
+            Ok(line) => search_string(&line, &pattern),
             Err(_) => true,
         })
         .enumerate()
         .map(|(n, l)| (n + 1, l))
+}
+
+#[cfg(feature = "simd")]
+#[inline]
+fn search_string(string: &str, pattern: &str) -> bool {
+    twoway::find_str(&string, pattern).is_some()
+}
+
+#[cfg(not(feature = "simd"))]
+#[inline]
+fn search_string(string: &str, pattern: &str) -> bool {
+    string.contains(pattern)
 }
