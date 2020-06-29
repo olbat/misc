@@ -14,7 +14,7 @@ options:
 ";
 
 // TODO: switch to a struct where we could save the position of the argument?
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ArgError {
     UnknownOption,
     MissingArgument,
@@ -148,5 +148,133 @@ impl Args {
             }
             _ => Err(ArgError::UnknownOption),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call_parse_args(args: &[&str]) -> Result<Args, ArgError> {
+        let mut args: VecDeque<String> = args.iter().map(|s| s.to_string()).collect();
+        Args::parse_args(&mut args)
+    }
+
+    #[test]
+    fn no_path_no_opt() {
+        let args = ["rgrep", "pattern"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_ok());
+        let args = res.unwrap();
+
+        assert_eq!(args.pattern, "pattern");
+        assert!(args.paths.is_empty());
+        assert_eq!(args.options.read_from_stdin, true);
+    }
+
+    #[test]
+    fn one_path_no_opt() {
+        let args = ["rgrep", "pattern", "path"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_ok());
+        let args = res.unwrap();
+
+        assert_eq!(args.pattern, "pattern");
+        assert_eq!(args.paths, vec!["path"]);
+    }
+
+    #[test]
+    fn multiple_paths_no_opt() {
+        let args = ["rgrep", "pattern", "path1", "path2", "path3"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_ok());
+        let args = res.unwrap();
+
+        assert_eq!(args.pattern, "pattern");
+        assert_eq!(args.paths, vec!["path1", "path2", "path3"]);
+    }
+
+    #[test]
+    fn parse_single_short_opt() {
+        let args = ["rgrep", "pattern", "-q", "path"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_ok());
+        let args = res.unwrap();
+
+        assert_eq!(args.pattern, "pattern");
+        assert_eq!(args.paths, vec!["path"]);
+        assert_eq!(args.options.quiet, true);
+    }
+
+    #[test]
+    fn parse_multi_short_opt() {
+        // TODO: add another option in the test when there will be one available
+        let args = ["rgrep", "-q", "pattern", "path"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_ok());
+        let args = res.unwrap();
+
+        assert_eq!(args.pattern, "pattern");
+        assert_eq!(args.paths, vec!["path"]);
+        assert_eq!(args.options.quiet, true);
+    }
+
+    #[test]
+    fn parse_single_long_opt() {
+        let args = ["rgrep", "pattern", "--quiet", "path"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_ok());
+        let args = res.unwrap();
+
+        assert_eq!(args.pattern, "pattern");
+        assert_eq!(args.paths, vec!["path"]);
+        assert_eq!(args.options.quiet, true);
+    }
+
+    #[test]
+    fn parse_multi_long_opt() {
+        // TODO: add another option in the test when there will be one available
+        let args = ["rgrep", "--quiet", "pattern", "path"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_ok());
+        let args = res.unwrap();
+
+        assert_eq!(args.pattern, "pattern");
+        assert_eq!(args.paths, vec!["path"]);
+        assert_eq!(args.options.quiet, true);
+    }
+
+    #[test]
+    fn parse_help_opt() {
+        let args = ["rgrep", "--help", "pattern", "path"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_err());
+        assert_eq!(res.err(), Some(ArgError::Usage));
+    }
+
+    #[test]
+    fn parse_unknown_opt_err() {
+        let args = ["rgrep", "--unknown-option", "pattern", "path"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_err());
+        assert_eq!(res.err(), Some(ArgError::UnknownOption));
+    }
+
+    #[test]
+    fn parse_missing_argument_err() {
+        let args = ["rgrep"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_err());
+        assert_eq!(res.err(), Some(ArgError::MissingArgument));
     }
 }

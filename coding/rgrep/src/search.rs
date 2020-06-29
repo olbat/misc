@@ -24,7 +24,6 @@ pub fn search_paths<'a, P: AsRef<Path> + 'a>(
     opts: &'a Options,
 ) -> impl Iterator<Item = (P, io::Result<impl Iterator<Item = Match> + 'a>)> {
     // TODO: search different files in parallel
-    // TODO: allow searching in directories (use a stack to avoid too many nested recursive calls?)
     paths.map(move |(p, e)| {
         if let Some(err) = e {
             (p, io::Result::Err(err))
