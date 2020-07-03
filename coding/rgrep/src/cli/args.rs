@@ -1,4 +1,4 @@
-use crate::Options;
+use super::Options;
 
 use std::collections::VecDeque;
 use std::convert::TryFrom;
@@ -11,12 +11,14 @@ pub const USAGE: &str = "usage: rgrep [options] <pattern> [<path1> <path2> ..]
 options:
   -q, --quiet\t\tRun in quiet mode (do not display any results)
   -h, --help\t\tDisplay the help message
+  - , --stdin\t\tRead from standard input
 ";
 
 // TODO: switch to a struct where we could save the position of the argument?
 #[derive(Debug, PartialEq)]
 pub enum ArgError {
     UnknownOption,
+    BothPathsAndStdin,
     MissingArgument,
     Usage, // technically not really an error but very convinient
 }
@@ -27,6 +29,7 @@ impl fmt::Display for ArgError {
         if !matches!(self, ArgError::Usage) {
             let err = match self {
                 ArgError::UnknownOption => "unknown option",
+                ArgError::BothPathsAndStdin => "cannot search both paths and stdin",
                 ArgError::MissingArgument => "missing argument",
                 _ => panic!("unknown error type"),
             };
@@ -65,7 +68,7 @@ impl Args {
     fn parse_args(args: &mut VecDeque<String>) -> Result<Args, ArgError> {
         args.pop_front(); // program name
 
-        let (mut pos_args, opts) = Self::parse_opts(args)?;
+        let (mut pos_args, mut opts) = Self::parse_opts(args)?;
 
         if pos_args.is_empty() {
             return Err(ArgError::MissingArgument);
@@ -73,6 +76,12 @@ impl Args {
 
         let pattern = pos_args.pop_front().unwrap();
         let paths = Vec::from(pos_args);
+
+        if paths.is_empty() {
+            opts.read_from_stdin = true;
+        } else if opts.read_from_stdin {
+            return Err(ArgError::BothPathsAndStdin);
+        }
 
         Ok(Self::new(pattern, paths, Some(opts)))
     }
@@ -198,6 +207,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_stdin_when_no_path() {
+        let args = ["rgrep", "pattern"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_ok());
+        let args = res.unwrap();
+
+        assert_eq!(args.pattern, "pattern");
+        assert!(args.paths.is_empty());
+        assert_eq!(args.options.read_from_stdin, true);
+    }
+
+    #[test]
     fn parse_single_short_opt() {
         let args = ["rgrep", "pattern", "-q", "path"];
         let res = call_parse_args(&args);
@@ -276,5 +298,14 @@ mod tests {
 
         assert!(res.is_err());
         assert_eq!(res.err(), Some(ArgError::MissingArgument));
+    }
+
+    #[test]
+    fn parse_both_path_and_stdin_err() {
+        let args = ["rgrep", "pattern", "path", "-"];
+        let res = call_parse_args(&args);
+
+        assert!(res.is_err());
+        assert_eq!(res.err(), Some(ArgError::BothPathsAndStdin));
     }
 }

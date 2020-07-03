@@ -5,7 +5,8 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::Path;
 
-use crate::Options;
+mod options;
+pub use options::Options;
 
 pub type Match = (usize, io::Result<String>);
 

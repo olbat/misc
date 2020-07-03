@@ -1,12 +1,12 @@
 use std::io;
 use std::path::Path;
 
-use crate::options;
+use super::Options;
 use crate::search;
 
 pub fn print_results<'a, P: AsRef<Path> + 'a>(
     results: impl Iterator<Item = (P, io::Result<impl Iterator<Item = search::Match> + 'a>)>,
-    opts: &'a options::Options,
+    opts: &'a Options,
 ) -> bool {
     let mut any_match = false;
 
@@ -24,7 +24,7 @@ pub fn print_results<'a, P: AsRef<Path> + 'a>(
 pub fn print_matches<'a>(
     filepath: &'a Path,
     matches: impl Iterator<Item = search::Match>,
-    opts: &'a options::Options,
+    opts: &'a Options,
 ) -> bool {
     let mut any_match = false;
 
@@ -42,7 +42,7 @@ pub fn print_matches<'a>(
 }
 
 #[inline]
-fn print_match<'a>(filepath: &'a Path, line_no: usize, line: String, opts: &'a options::Options) {
+fn print_match<'a>(filepath: &'a Path, line_no: usize, line: String, opts: &'a Options) {
     if !opts.quiet {
         println!("{}:{}:{}", filepath.display(), line_no, line);
     }
