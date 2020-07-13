@@ -77,3 +77,16 @@ fn search_string(string: &str, pattern: &str) -> bool {
 fn search_string(string: &str, pattern: &str) -> bool {
     string.contains(pattern)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple_search_string() {
+        let string = "some simple string";
+
+        assert_eq!(search_string(string, "simple"), true);
+        assert_eq!(search_string(string, "complex"), false);
+    }
+}
