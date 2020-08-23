@@ -49,7 +49,9 @@ pub fn search_file<'a>(
     let mut had_error = false;
 
     f.lines()
-        .take_while(move |res| match res {
+        .enumerate()
+        .map(|(n, l)| (n + 1, l))
+        .take_while(move |(_, res)| match res {
             Ok(_) => !had_error,
             Err(_) => {
                 // stop iterating after the first error
@@ -58,12 +60,10 @@ pub fn search_file<'a>(
                 stop
             }
         })
-        .filter(move |res| match res {
+        .filter(move |(_, res)| match res {
             Ok(line) => search_string(&line, &pattern),
             Err(_) => true,
         })
-        .enumerate()
-        .map(|(n, l)| (n + 1, l))
 }
 
 #[cfg(feature = "simd")]
