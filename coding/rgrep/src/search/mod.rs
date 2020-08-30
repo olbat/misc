@@ -98,12 +98,12 @@ mod tests {
     #[test]
     fn simple_search_file() {
         let mut file = tempfile().unwrap();
-        writeln!(file, "first simple string");
-        writeln!(file, "other string");
-        writeln!(file, "some other string");
-        writeln!(file);
-        writeln!(file, "second simple string");
-        writeln!(file, "a last string");
+        writeln!(file, "first simple string").unwrap();
+        writeln!(file, "other string").unwrap();
+        writeln!(file, "some other string").unwrap();
+        writeln!(file).unwrap();
+        writeln!(file, "second simple string").unwrap();
+        writeln!(file, "a last string").unwrap();
         file.seek(SeekFrom::Start(0)).unwrap();
 
         let options = Options::new();
@@ -134,27 +134,27 @@ mod tests {
 
         let file1_path = dir_path.join("file1");
         let mut file1 = File::create(&file1_path).unwrap();
-        writeln!(file1);
-        writeln!(file1, "first simple string");
-        writeln!(file1, "other string");
-        writeln!(file1);
-        writeln!(file1);
-        writeln!(file1, "second simple string");
+        writeln!(file1).unwrap();
+        writeln!(file1, "first simple string").unwrap();
+        writeln!(file1, "other string").unwrap();
+        writeln!(file1).unwrap();
+        writeln!(file1).unwrap();
+        writeln!(file1, "second simple string").unwrap();
 
         let file2_path = dir_path.join("file2");
         let mut file2 = File::create(&file2_path).unwrap();
-        writeln!(file2, "nothing");
-        writeln!(file2, "matching");
-        writeln!(file2, "here");
+        writeln!(file2, "nothing").unwrap();
+        writeln!(file2, "matching").unwrap();
+        writeln!(file2, "here").unwrap();
 
         let subdir_path = dir_path.join("some").join("sub").join("dir");
         fs::create_dir_all(&subdir_path).unwrap();
 
         let file3_path = subdir_path.join("file3");
         let mut file3 = File::create(&file3_path).unwrap();
-        writeln!(file3, "third simple string");
-        writeln!(file3, "third simple string");
-        writeln!(file3, "third simple string");
+        writeln!(file3, "third simple string").unwrap();
+        writeln!(file3, "third simple string").unwrap();
+        writeln!(file3, "third simple string").unwrap();
 
         let paths = vec![&file1_path, &file2_path, &file3_path];
         let options = Options::new();
@@ -231,5 +231,29 @@ mod tests {
     }
 
     #[test]
-    fn search_path_with_error() {}
+    fn search_path_with_error() {
+        let path = "/dev/null";
+        let paths = vec![&path];
+        let options = Options::new();
+
+        let mut paths_results = search_paths(
+            "simple",
+            paths.iter().map(|p| {
+                (
+                    p,
+                    Some(io::Error::new(io::ErrorKind::InvalidData, "Special device")),
+                )
+            }),
+            &options,
+        );
+
+        let paths_result = paths_results.next();
+        assert!(paths_result.is_some());
+        let paths_result = paths_result.unwrap();
+        assert_eq!(*paths_result.0, &path);
+        assert!(paths_result.1.is_err());
+
+        let paths_result = paths_results.next();
+        assert!(paths_result.is_none());
+    }
 }
