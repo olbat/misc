@@ -447,7 +447,10 @@ def _encrypt_moo(readable, writable, moo, iv=None):
         # PKCS#7 padding
         # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
         if (moo == MoO.ECB) or (moo == MoO.CBC):
-            block = _bytes2block(bytes([llen for _ in range(llen)]))
+            pt = bytes([16] * 16)
+            if moo == MoO.CBC:
+                pt = bytes(a ^ b for a, b in zip(pt, iv))
+            block = _bytes2block(pt)
             yield block
             writable.write(_block2bytes(block))
 
@@ -478,16 +481,17 @@ def _decrypt_moo(readable, writable, moo):
         yield block
         bs = _block2bytes(block)
 
-        if (moo == MoO.CBC) and (not last_block):
+        if moo == MoO.CBC:
             bs = [b for b in bs]
             for i in range(NB*NB):
                 bs[i] ^= iv[i]
             iv = ct
+            bs = bytes(bs)
 
         # PKCS#7 padding
         # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
         if ((moo == MoO.ECB) or (moo == MoO.CBC)) and last_block:
-            bs = bytes(bs[:-int(bs[-1])])
+            bs = bs[:-bs[-1]]
         else:
             bs = bytes(bs)
 
