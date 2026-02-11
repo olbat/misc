@@ -852,12 +852,837 @@ class TestAES(unittest.TestCase):
                 'hex',
             ),
         ),
+        # NIST SP 800-38A CFB128 test vectors
+        # (see https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38a.pdf
+        #  Appendix F.3)
+        # AES128-CFB
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '2B7E1516' '28AED2A6' 'ABF71588' '09CF4F3C',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F',
+                'hex',
+            ),
+            text=codecs.decode(
+                '6BC1BEE2' '2E409F96' 'E93D7E11' '7393172A'
+                'AE2D8A57' '1E03AC9C' '9EB76FAC' '45AF8E51'
+                '30C81C46' 'A35CE411' 'E5FBC119' '1A0A52EF'
+                'F69F2445' 'DF4F9B17' 'AD2B417B' 'E66C3710',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F'
+                '3B3FD92E' 'B72DAD20' '333449F8' 'E83CFB4A'
+                'C8A64537' 'A0B3A93F' 'CDE3CDAD' '9F1CE58B'
+                '26751F67' 'A3CBB140' 'B1808CF1' '87A4F4DF'
+                'C04B0535' '7C5D1C0E' 'EAC4C66F' '9FF7F2E6',
+                'hex',
+            ),
+        ),
+        # AES192-CFB
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '8E73B0F7' 'DA0E6452' 'C810F32B' '809079E5'
+                '62F8EAD2' '522C6B7B',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F',
+                'hex',
+            ),
+            text=codecs.decode(
+                '6BC1BEE2' '2E409F96' 'E93D7E11' '7393172A'
+                'AE2D8A57' '1E03AC9C' '9EB76FAC' '45AF8E51'
+                '30C81C46' 'A35CE411' 'E5FBC119' '1A0A52EF'
+                'F69F2445' 'DF4F9B17' 'AD2B417B' 'E66C3710',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F'
+                'CDC80D6F' 'DDF18CAB' '34C25909' 'C99A4174'
+                '67CE7F7F' '81173621' '961A2B70' '171D3D7A'
+                '2E1E8A1D' 'D59B88B1' 'C8E60FED' '1EFAC4C9'
+                'C05F9F9C' 'A9834FA0' '42AE8FBA' '584B09FF',
+                'hex',
+            ),
+        ),
+        # AES256-CFB
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '603DEB10' '15CA71BE' '2B73AEF0' '857D7781'
+                '1F352C07' '3B6108D7' '2D9810A3' '0914DFF4',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F',
+                'hex',
+            ),
+            text=codecs.decode(
+                '6BC1BEE2' '2E409F96' 'E93D7E11' '7393172A'
+                'AE2D8A57' '1E03AC9C' '9EB76FAC' '45AF8E51'
+                '30C81C46' 'A35CE411' 'E5FBC119' '1A0A52EF'
+                'F69F2445' 'DF4F9B17' 'AD2B417B' 'E66C3710',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F'
+                'DC7E84BF' 'DA79164B' '7ECD8486' '985D3860'
+                '39FFED14' '3B28B1C8' '32113C63' '31E5407B'
+                'DF101324' '15E54B92' 'A13ED0A8' '267AE2F9'
+                '75A38574' '1AB9CEF8' '2031623D' '55B1E471',
+                'hex',
+            ),
+        ),
+        # NIST SP 800-38A OFB test vectors
+        # (see https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38a.pdf
+        #  Appendix F.4)
+        # AES128-OFB
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '2B7E1516' '28AED2A6' 'ABF71588' '09CF4F3C',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F',
+                'hex',
+            ),
+            text=codecs.decode(
+                '6BC1BEE2' '2E409F96' 'E93D7E11' '7393172A'
+                'AE2D8A57' '1E03AC9C' '9EB76FAC' '45AF8E51'
+                '30C81C46' 'A35CE411' 'E5FBC119' '1A0A52EF'
+                'F69F2445' 'DF4F9B17' 'AD2B417B' 'E66C3710',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F'
+                '3B3FD92E' 'B72DAD20' '333449F8' 'E83CFB4A'
+                '7789508D' '16918F03' 'F53C52DA' 'C54ED825'
+                '9740051E' '9C5FECF6' '4344F7A8' '2260EDCC'
+                '304C6528' 'F659C778' '66A510D9' 'C1D6AE5E',
+                'hex',
+            ),
+        ),
+        # AES192-OFB
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '8E73B0F7' 'DA0E6452' 'C810F32B' '809079E5'
+                '62F8EAD2' '522C6B7B',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F',
+                'hex',
+            ),
+            text=codecs.decode(
+                '6BC1BEE2' '2E409F96' 'E93D7E11' '7393172A'
+                'AE2D8A57' '1E03AC9C' '9EB76FAC' '45AF8E51'
+                '30C81C46' 'A35CE411' 'E5FBC119' '1A0A52EF'
+                'F69F2445' 'DF4F9B17' 'AD2B417B' 'E66C3710',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F'
+                'CDC80D6F' 'DDF18CAB' '34C25909' 'C99A4174'
+                'FCC28B8D' '4C63837C' '09E81700' 'C1100401'
+                '8D9A9AEA' 'C0F6596F' '559C6D4D' 'AF59A5F2'
+                '6D9F2008' '57CA6C3E' '9CAC524B' 'D9ACC92A',
+                'hex',
+            ),
+        ),
+        # AES256-OFB
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '603DEB10' '15CA71BE' '2B73AEF0' '857D7781'
+                '1F352C07' '3B6108D7' '2D9810A3' '0914DFF4',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F',
+                'hex',
+            ),
+            text=codecs.decode(
+                '6BC1BEE2' '2E409F96' 'E93D7E11' '7393172A'
+                'AE2D8A57' '1E03AC9C' '9EB76FAC' '45AF8E51'
+                '30C81C46' 'A35CE411' 'E5FBC119' '1A0A52EF'
+                'F69F2445' 'DF4F9B17' 'AD2B417B' 'E66C3710',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '00010203' '04050607' '08090A0B' '0C0D0E0F'
+                'DC7E84BF' 'DA79164B' '7ECD8486' '985D3860'
+                '4FEBDC67' '40D20B3A' 'C88F6AD8' '2A4FB08D'
+                '71AB47A0' '86E86EED' 'F39D1C5B' 'BA97C408'
+                '0126141D' '67F37BE8' '538F5A8B' 'E740E484',
+                'hex',
+            ),
+        ),
+        # NIST SP 800-38A CTR test vectors
+        # (see https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38a.pdf
+        #  Appendix F.5)
+        # AES128-CTR
+        TestVector(
+            moo=aes.MoO.CTR,
+            key=codecs.decode(
+                '2B7E1516' '28AED2A6' 'ABF71588' '09CF4F3C',
+                'hex',
+            ),
+            iv=codecs.decode(
+                'F0F1F2F3' 'F4F5F6F7' 'F8F9FAFB' 'FCFDFEFF',
+                'hex',
+            ),
+            text=codecs.decode(
+                '6BC1BEE2' '2E409F96' 'E93D7E11' '7393172A'
+                'AE2D8A57' '1E03AC9C' '9EB76FAC' '45AF8E51'
+                '30C81C46' 'A35CE411' 'E5FBC119' '1A0A52EF'
+                'F69F2445' 'DF4F9B17' 'AD2B417B' 'E66C3710',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                'F0F1F2F3' 'F4F5F6F7' 'F8F9FAFB' 'FCFDFEFF'
+                '874D6191' 'B620E326' '1BEF6864' '990DB6CE'
+                '9806F66B' '7970FDFF' '8617187B' 'B9FFFDFF'
+                '5AE4DF3E' 'DBD5D35E' '5B4F0902' '0DB03EAB'
+                '1E031DDA' '2FBE03D1' '792170A0' 'F3009CEE',
+                'hex',
+            ),
+        ),
+        # AES192-CTR
+        TestVector(
+            moo=aes.MoO.CTR,
+            key=codecs.decode(
+                '8E73B0F7' 'DA0E6452' 'C810F32B' '809079E5'
+                '62F8EAD2' '522C6B7B',
+                'hex',
+            ),
+            iv=codecs.decode(
+                'F0F1F2F3' 'F4F5F6F7' 'F8F9FAFB' 'FCFDFEFF',
+                'hex',
+            ),
+            text=codecs.decode(
+                '6BC1BEE2' '2E409F96' 'E93D7E11' '7393172A'
+                'AE2D8A57' '1E03AC9C' '9EB76FAC' '45AF8E51'
+                '30C81C46' 'A35CE411' 'E5FBC119' '1A0A52EF'
+                'F69F2445' 'DF4F9B17' 'AD2B417B' 'E66C3710',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                'F0F1F2F3' 'F4F5F6F7' 'F8F9FAFB' 'FCFDFEFF'
+                '1ABC9324' '17521CA2' '4F2B0459' 'FE7E6E0B'
+                '090339EC' '0AA6FAEF' 'D5CCC2C6' 'F4CE8E94'
+                '1E36B26B' 'D1EBC670' 'D1BD1D66' '5620ABF7'
+                '4F78A7F6' 'D2980958' '5A97DAEC' '58C6B050',
+                'hex',
+            ),
+        ),
+        # AES256-CTR
+        TestVector(
+            moo=aes.MoO.CTR,
+            key=codecs.decode(
+                '603DEB10' '15CA71BE' '2B73AEF0' '857D7781'
+                '1F352C07' '3B6108D7' '2D9810A3' '0914DFF4',
+                'hex',
+            ),
+            iv=codecs.decode(
+                'F0F1F2F3' 'F4F5F6F7' 'F8F9FAFB' 'FCFDFEFF',
+                'hex',
+            ),
+            text=codecs.decode(
+                '6BC1BEE2' '2E409F96' 'E93D7E11' '7393172A'
+                'AE2D8A57' '1E03AC9C' '9EB76FAC' '45AF8E51'
+                '30C81C46' 'A35CE411' 'E5FBC119' '1A0A52EF'
+                'F69F2445' 'DF4F9B17' 'AD2B417B' 'E66C3710',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                'F0F1F2F3' 'F4F5F6F7' 'F8F9FAFB' 'FCFDFEFF'
+                '601EC313' '775789A5' 'B7A7F504' 'BBF3D228'
+                'F443E3CA' '4D62B59A' 'CA84E990' 'CACAF5C5'
+                '2B0930DA' 'A23DE94C' 'E87017BA' '2D84988D'
+                'DFC9C58D' 'B67AADA6' '13C2DD08' '457941A6',
+                'hex',
+            ),
+        ),
+        # NIST CAVP test vectors
+        # (see https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/block-ciphers
+        #  KAT_AES.zip: GFSbox, aesmmt.zip: MMT multi-block message tests)
+        #
+        # CAVP CFB128 GFSbox128 (zero key, varying IV)
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                'F34481EC' '3CC627BA' 'CD5DC3FB' '08F273E6',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                'F34481EC' '3CC627BA' 'CD5DC3FB' '08F273E6'
+                '0336763E' '966D9259' '5A567CC9' 'CE537F5E',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '9798C464' '0BAD75C7' 'C3227DB9' '10174E72',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '9798C464' '0BAD75C7' 'C3227DB9' '10174E72'
+                'A9A1631B' 'F4996954' 'EBC09395' '7B234589',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '96AB5C2F' 'F612D9DF' 'AAE8C31F' '30C42168',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '96AB5C2F' 'F612D9DF' 'AAE8C31F' '30C42168'
+                'FF4F8391' 'A6A40CA5' 'B25D23BE' 'DD44A597',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '6A118A87' '4519E64E' '9963798A' '503F1D35',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '6A118A87' '4519E64E' '9963798A' '503F1D35'
+                'DC43BE40' 'BE0E5371' '2F7E2BF5' 'CA707209',
+                'hex',
+            ),
+        ),
+        # CAVP CFB128 GFSbox192 (zero key, varying IV)
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '1B077A6A' 'F4B7F982' '29DE786D' '7516B639',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '1B077A6A' 'F4B7F982' '29DE786D' '7516B639'
+                '275CFC04' '13D8CCB7' '0513C385' '9B1D0F72',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '9C2D8842' 'E5F48F57' '648205D3' '9A239AF1',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '9C2D8842' 'E5F48F57' '648205D3' '9A239AF1'
+                'C9B8135F' 'F1B5ADC4' '13DFD053' 'B21BD96D',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                'BFF52510' '095F518E' 'CCA60AF4' '205444BB',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                'BFF52510' '095F518E' 'CCA60AF4' '205444BB'
+                '4A3650C3' '371CE2EB' '35E389A1' '71427440',
+                'hex',
+            ),
+        ),
+        # CAVP CFB128 GFSbox256 (zero key, varying IV)
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '014730F8' '0AC625FE' '84F026C6' '0BFD547D',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '014730F8' '0AC625FE' '84F026C6' '0BFD547D'
+                '5C9D844E' 'D46F9885' '085E5D6A' '4F94C7D7',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '0B24AF36' '193CE466' '5F2825D7' 'B4749C98',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '0B24AF36' '193CE466' '5F2825D7' 'B4749C98'
+                'A9FF75BD' '7CF6613D' '3731C77C' '3B6D0C04',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '761C1FE4' '1A18ACF2' '0D241650' '611D90F1',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '761C1FE4' '1A18ACF2' '0D241650' '611D90F1'
+                '623A52FC' 'EA5D443E' '48D9181A' 'B32C7421',
+                'hex',
+            ),
+        ),
+        # CAVP CFB128 MMT128 (multi-block, 2 blocks)
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '701CCC4C' '0E36E512' 'CE077F5A' 'F6CCB957',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '5337DDEA' 'F89A00DD' '4D58D860' 'DE968469',
+                'hex',
+            ),
+            text=codecs.decode(
+                'CC1172F2' 'F80866D0' '768B25F7' '0FCF6361'
+                'AAB7C627' 'C8488F97' '525D7D88' '949BEEEA',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '5337DDEA' 'F89A00DD' '4D58D860' 'DE968469'
+                'CDCF093B' 'B7840DF2' '25683B58' 'A479B00D'
+                '5DE5553A' '7E85EAE4' 'B70BF46D' 'C729DD31',
+                'hex',
+            ),
+        ),
+        # CAVP CFB128 MMT192 (multi-block, 2 blocks)
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                '69F9D298' '85743826' 'D7C5AFC5' '3637E6B1'
+                'FA9512A1' '0EEA9CA9',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '3743793C' '7144A755' '768437F4' 'EF5A33C8',
+                'hex',
+            ),
+            text=codecs.decode(
+                'F84EBF42' 'A758971C' '369949E2' '88F775C9'
+                'CF6A82AB' '51B28657' '6B45652C' 'D68C3CE6',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '3743793C' '7144A755' '768437F4' 'EF5A33C8'
+                'A3BD28BB' '817BDB3F' '6492827F' '2AA3E6E1'
+                '34C25412' '9D8F20DB' 'C92389B7' 'D89702D6',
+                'hex',
+            ),
+        ),
+        # CAVP CFB128 MMT256 (multi-block, 2 blocks)
+        TestVector(
+            moo=aes.MoO.CFB,
+            key=codecs.decode(
+                'AE59254C' '66D8F533' 'E7F5002C' 'ED480C33'
+                '984A421D' '7816E27B' 'E66C34C1' '9BFBC2A8',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '821DD216' '53ECE3AF' '675CD25D' '26017AE3',
+                'hex',
+            ),
+            text=codecs.decode(
+                '3CB4F17E' '775C2D6D' '06DD60F1' '5D6C3A10'
+                '3E513172' '7F9C6CB8' '0D13E00F' '316EB904',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '821DD216' '53ECE3AF' '675CD25D' '26017AE3'
+                'AE375DB9' 'F28148C4' '60F6C6B6' '665FCC2F'
+                'F6B50B8E' 'AF82C64B' 'BA8C649E' 'FD4731BC',
+                'hex',
+            ),
+        ),
+        # CAVP OFB GFSbox128 (zero key, varying IV)
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                'F34481EC' '3CC627BA' 'CD5DC3FB' '08F273E6',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                'F34481EC' '3CC627BA' 'CD5DC3FB' '08F273E6'
+                '0336763E' '966D9259' '5A567CC9' 'CE537F5E',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '9798C464' '0BAD75C7' 'C3227DB9' '10174E72',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '9798C464' '0BAD75C7' 'C3227DB9' '10174E72'
+                'A9A1631B' 'F4996954' 'EBC09395' '7B234589',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '96AB5C2F' 'F612D9DF' 'AAE8C31F' '30C42168',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '96AB5C2F' 'F612D9DF' 'AAE8C31F' '30C42168'
+                'FF4F8391' 'A6A40CA5' 'B25D23BE' 'DD44A597',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '6A118A87' '4519E64E' '9963798A' '503F1D35',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '6A118A87' '4519E64E' '9963798A' '503F1D35'
+                'DC43BE40' 'BE0E5371' '2F7E2BF5' 'CA707209',
+                'hex',
+            ),
+        ),
+        # CAVP OFB GFSbox192 (zero key, varying IV)
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '1B077A6A' 'F4B7F982' '29DE786D' '7516B639',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '1B077A6A' 'F4B7F982' '29DE786D' '7516B639'
+                '275CFC04' '13D8CCB7' '0513C385' '9B1D0F72',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '9C2D8842' 'E5F48F57' '648205D3' '9A239AF1',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '9C2D8842' 'E5F48F57' '648205D3' '9A239AF1'
+                'C9B8135F' 'F1B5ADC4' '13DFD053' 'B21BD96D',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                'BFF52510' '095F518E' 'CCA60AF4' '205444BB',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                'BFF52510' '095F518E' 'CCA60AF4' '205444BB'
+                '4A3650C3' '371CE2EB' '35E389A1' '71427440',
+                'hex',
+            ),
+        ),
+        # CAVP OFB GFSbox256 (zero key, varying IV)
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '014730F8' '0AC625FE' '84F026C6' '0BFD547D',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '014730F8' '0AC625FE' '84F026C6' '0BFD547D'
+                '5C9D844E' 'D46F9885' '085E5D6A' '4F94C7D7',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '0B24AF36' '193CE466' '5F2825D7' 'B4749C98',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '0B24AF36' '193CE466' '5F2825D7' 'B4749C98'
+                'A9FF75BD' '7CF6613D' '3731C77C' '3B6D0C04',
+                'hex',
+            ),
+        ),
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000'
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '761C1FE4' '1A18ACF2' '0D241650' '611D90F1',
+                'hex',
+            ),
+            text=codecs.decode(
+                '00000000' '00000000' '00000000' '00000000',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '761C1FE4' '1A18ACF2' '0D241650' '611D90F1'
+                '623A52FC' 'EA5D443E' '48D9181A' 'B32C7421',
+                'hex',
+            ),
+        ),
+        # CAVP OFB MMT128 (multi-block, 2 blocks)
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                'C9F4CE21' 'B4C7DAAA' '4F93E292' 'DC605BC5',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '5E5A8CF2' '808C720E' '01C1ED92' 'D470A45D',
+                'hex',
+            ),
+            text=codecs.decode(
+                '8E19C5CA' 'CD015A66' '2E7F40CD' 'ECADBF79'
+                'A68081C0' '6D9544B4' '1C2DD248' 'E77633B4',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '5E5A8CF2' '808C720E' '01C1ED92' 'D470A45D'
+                '885DC48A' 'DD7EE6A1' '839BC5C5' 'E03BEAE0'
+                '71301ECF' '91A01115' '20CDE0D3' 'A112F5D2',
+                'hex',
+            ),
+        ),
+        # CAVP OFB MMT192 (multi-block, 2 blocks)
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                '6A32B19F' 'C5F048A2' '9EFE9792' '7E8F91DF'
+                '23390278' 'D4FC81EB',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '39776BF5' 'D8965C7B' '795E3C6F' '23115CAC',
+                'hex',
+            ),
+            text=codecs.decode(
+                'E8BC8453' 'A7D47DE7' 'A9CCD943' '85B00869'
+                '3E4645F3' '179311B4' 'A9A1E09C' '328012DC',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '39776BF5' 'D8965C7B' '795E3C6F' '23115CAC'
+                '18132430' 'A50B89C6' '4C72C5D9' '092D8BFB'
+                '84429179' '9D701516' '90CA8583' '7D89A79D',
+                'hex',
+            ),
+        ),
+        # CAVP OFB MMT256 (multi-block, 2 blocks)
+        TestVector(
+            moo=aes.MoO.OFB,
+            key=codecs.decode(
+                'A9257760' '7968DBEE' 'E135A24E' 'DC2F3263'
+                '926D9714' '1F2C6D9F' '96C0012F' '45D1B3B0',
+                'hex',
+            ),
+            iv=codecs.decode(
+                '97BFEBEC' '0C2E7704' 'D002DC6A' '1FD36901',
+                'hex',
+            ),
+            text=codecs.decode(
+                'BB28705E' 'F9E5151A' 'FC73E388' '6F25F521'
+                '75DBB57A' 'E36EACC5' 'AC4E989B' '9D69BFF9',
+                'hex',
+            ),
+            cipher=codecs.decode(
+                '97BFEBEC' '0C2E7704' 'D002DC6A' '1FD36901'
+                '944169B5' '10B28255' '05A14B22' 'EABA744C'
+                '19EE30DA' '6ED697E3' 'B879425F' '26808289',
+                'hex',
+            ),
+        ),
     )
 
-    def test_encrypt(self):
+    def _vectors_for_moo(self, moo):
+        return [tv for tv in self.__class__.TEST_VECTORS if tv.moo == moo]
+
+    def _test_encrypt(self, moo):
         iio = BytesIO()
         oio = BytesIO()
-        for tv in self.__class__.TEST_VECTORS:
+        for tv in self._vectors_for_moo(moo):
             iio.truncate(0)
             iio.seek(0)
             oio.truncate(0)
@@ -870,10 +1695,10 @@ class TestAES(unittest.TestCase):
 
             self.assertEqual(tv.cipher.hex(), oio.read().hex())
 
-    def test_decrypt(self):
+    def _test_decrypt(self, moo):
         iio = BytesIO()
         oio = BytesIO()
-        for tv in self.__class__.TEST_VECTORS:
+        for tv in self._vectors_for_moo(moo):
             iio.truncate(0)
             iio.seek(0)
             oio.truncate(0)
@@ -886,10 +1711,10 @@ class TestAES(unittest.TestCase):
 
             self.assertEqual(tv.text.hex(), oio.read().hex())
 
-    def test_encrypt_decrypt(self):
+    def _test_encrypt_decrypt(self, moo):
         iio = BytesIO()
         oio = BytesIO()
-        for tv in self.__class__.TEST_VECTORS:
+        for tv in self._vectors_for_moo(moo):
             iio.truncate(0)
             iio.seek(0)
             oio.truncate(0)
@@ -906,6 +1731,51 @@ class TestAES(unittest.TestCase):
             iio.seek(0)
 
             self.assertEqual(tv.text.hex(), iio.read().hex())
+
+    def test_ecb_encrypt(self):
+        self._test_encrypt(aes.MoO.ECB)
+
+    def test_ecb_decrypt(self):
+        self._test_decrypt(aes.MoO.ECB)
+
+    def test_ecb_encrypt_decrypt(self):
+        self._test_encrypt_decrypt(aes.MoO.ECB)
+
+    def test_cbc_encrypt(self):
+        self._test_encrypt(aes.MoO.CBC)
+
+    def test_cbc_decrypt(self):
+        self._test_decrypt(aes.MoO.CBC)
+
+    def test_cbc_encrypt_decrypt(self):
+        self._test_encrypt_decrypt(aes.MoO.CBC)
+
+    def test_cfb_encrypt(self):
+        self._test_encrypt(aes.MoO.CFB)
+
+    def test_cfb_decrypt(self):
+        self._test_decrypt(aes.MoO.CFB)
+
+    def test_cfb_encrypt_decrypt(self):
+        self._test_encrypt_decrypt(aes.MoO.CFB)
+
+    def test_ofb_encrypt(self):
+        self._test_encrypt(aes.MoO.OFB)
+
+    def test_ofb_decrypt(self):
+        self._test_decrypt(aes.MoO.OFB)
+
+    def test_ofb_encrypt_decrypt(self):
+        self._test_encrypt_decrypt(aes.MoO.OFB)
+
+    def test_ctr_encrypt(self):
+        self._test_encrypt(aes.MoO.CTR)
+
+    def test_ctr_decrypt(self):
+        self._test_decrypt(aes.MoO.CTR)
+
+    def test_ctr_encrypt_decrypt(self):
+        self._test_encrypt_decrypt(aes.MoO.CTR)
 
 
 if __name__ == '__main__':

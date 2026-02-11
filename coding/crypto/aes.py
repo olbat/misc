@@ -246,11 +246,16 @@ class MoO(Enum):
     '''
     ECB = 0
     CBC = 1
-    # TODO: add support for other modes
     # PCBC = 2
-    # CFB = 3
-    # OFB = 4
-    # CTR = 5
+    CFB = 3
+    OFB = 4
+    CTR = 5
+
+
+def _inc_counter(ctr):
+    '''Increment a 128-bit counter block (big-endian) by 1'''
+    val = int.from_bytes(ctr, 'big') + 1
+    return val.to_bytes(16, 'big')
 
 
 def _bytes2block(bs, dim=NB):
@@ -416,6 +421,9 @@ def _encrypt_moo(readable, writable, moo, iv=None):
             iv = getrandbits(16 * 8).to_bytes(16, 'little', signed=False)
         writable.write(bytes(iv))
 
+    if moo == MoO.CTR:
+        counter = bytes(iv)
+
     llen = None
     for pt in iter(lambda: readable.read(NB*NB), b""):
         llen = len(pt)
@@ -427,21 +435,46 @@ def _encrypt_moo(readable, writable, moo, iv=None):
                 pn = (NB*NB) - llen
                 pt += bytes([pn for _ in range(pn)])
 
-        if moo == MoO.CBC:
-            pt = [b for b in pt]
-            for i in range(NB*NB):
-                pt[i] ^= iv[i]
-            pt = bytes(pt)
+        if moo == MoO.CFB:
+            block = _bytes2block(bytes(iv))
+            yield block
+            keystream = _block2bytes(block)
+            ct = bytes(a ^ b for a, b in zip(keystream, pt))
+            iv = ct if len(ct) == NB*NB else ct + bytes(NB*NB - len(ct))
+            writable.write(ct)
 
-        # block is modified in place
-        block = _bytes2block(pt)
-        yield block
-        bs = _block2bytes(block)
+        elif moo == MoO.OFB:
+            block = _bytes2block(bytes(iv))
+            yield block
+            iv = _block2bytes(block)
+            ct = bytes(a ^ b for a, b in zip(iv, pt))
+            writable.write(ct)
 
-        if moo == MoO.CBC:
-            iv = [b for b in bs]
+        elif moo == MoO.CTR:
+            block = _bytes2block(counter)
+            yield block
+            keystream = _block2bytes(block)
+            ct = bytes(a ^ b for a, b in zip(keystream, pt))
+            counter = _inc_counter(counter)
+            writable.write(ct)
 
-        writable.write(bs)
+        else:
+            # ECB or CBC
+            if moo == MoO.CBC:
+                pt = [b for b in pt]
+                for i in range(NB*NB):
+                    pt[i] ^= iv[i]
+                pt = bytes(pt)
+
+            # block is modified in place
+            block = _bytes2block(pt)
+            yield block
+            bs = _block2bytes(block)
+
+            if moo == MoO.CBC:
+                iv = [b for b in bs]
+
+            writable.write(bs)
 
     if llen == NB*NB:
         # PKCS#7 padding
@@ -466,36 +499,67 @@ def _decrypt_moo(readable, writable, moo):
     if moo != MoO.ECB:
         iv = [b for b in readable.read(NB*NB)]
 
+    if moo == MoO.CTR:
+        counter = bytes(iv)
+
+    stream_mode = moo in (MoO.CFB, MoO.OFB, MoO.CTR)
+
     for ct in iter(lambda: readable.read(NB*NB), b""):
-        # FIXME: ugly hack
-        last_block = (readable.read(1) == b"")
-        if not last_block:
-            readable.seek(-1, SEEK_CUR)
+        if not stream_mode:
+            # FIXME: ugly hack
+            last_block = (readable.read(1) == b"")
+            if not last_block:
+                readable.seek(-1, SEEK_CUR)
 
         if len(ct) < NB*NB:
             if (moo == MoO.ECB) or (moo == MoO.CBC):
                 raise ValueError
 
-        block = _bytes2block(ct)
-        # block is modified in place
-        yield block
-        bs = _block2bytes(block)
+        if moo == MoO.CFB:
+            block = _bytes2block(bytes(iv))
+            yield block
+            keystream = _block2bytes(block)
+            pt = bytes(a ^ b for a, b in zip(keystream, ct))
+            iv = ct if len(ct) == NB*NB else list(ct) + [0] * (NB*NB - len(ct))
+            writable.write(pt)
 
-        if moo == MoO.CBC:
-            bs = [b for b in bs]
-            for i in range(NB*NB):
-                bs[i] ^= iv[i]
-            iv = ct
-            bs = bytes(bs)
+        elif moo == MoO.OFB:
+            block = _bytes2block(bytes(iv))
+            yield block
+            iv = _block2bytes(block)
+            pt = bytes(a ^ b for a, b in zip(iv, ct))
+            writable.write(pt)
 
-        # PKCS#7 padding
-        # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
-        if ((moo == MoO.ECB) or (moo == MoO.CBC)) and last_block:
-            bs = bs[:-bs[-1]]
+        elif moo == MoO.CTR:
+            block = _bytes2block(counter)
+            yield block
+            keystream = _block2bytes(block)
+            pt = bytes(a ^ b for a, b in zip(keystream, ct))
+            counter = _inc_counter(counter)
+            writable.write(pt)
+
         else:
-            bs = bytes(bs)
+            # ECB or CBC
+            block = _bytes2block(ct)
+            # block is modified in place
+            yield block
+            bs = _block2bytes(block)
 
-        writable.write(bs)
+            if moo == MoO.CBC:
+                bs = [b for b in bs]
+                for i in range(NB*NB):
+                    bs[i] ^= iv[i]
+                iv = ct
+                bs = bytes(bs)
+
+            # PKCS#7 padding
+            # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
+            if ((moo == MoO.ECB) or (moo == MoO.CBC)) and last_block:
+                bs = bs[:-bs[-1]]
+            else:
+                bs = bytes(bs)
+
+            writable.write(bs)
 
 
 def genkey(size):
@@ -559,20 +623,35 @@ def decrypt(readable, writable, key, moo=MoO.CBC):
     ks = len(expkey) // 16
     expkeys = [expkey[i*NB*NB:(i+1)*NB*NB] for i in range(ks)]
 
-    for block in _decrypt_moo(readable, writable, moo):
-        _add_round_key(block, expkeys[rounds])
+    stream_mode = moo in (MoO.CFB, MoO.OFB, MoO.CTR)
 
-        for r in range(rounds - 1, 0, -1):
+    for block in _decrypt_moo(readable, writable, moo):
+        if stream_mode:
+            # Stream modes use AES forward encryption
+            _add_round_key(block, expkeys[0])
+
+            for r in range(1, rounds):
+                _sub_bytes(block)
+                _shift_rows(block)
+                _mix_columns(block)
+                _add_round_key(block, expkeys[r])
+
+            _sub_bytes(block)
+            _shift_rows(block)
+            _add_round_key(block, expkeys[rounds])
+        else:
+            # Block modes use AES inverse decryption
+            _add_round_key(block, expkeys[rounds])
+
+            for r in range(rounds - 1, 0, -1):
+                _shift_rows_inv(block)
+                _sub_bytes_inv(block)
+                _add_round_key(block, expkeys[r])
+                _mix_columns_inv(block)
+
             _shift_rows_inv(block)
             _sub_bytes_inv(block)
-            _add_round_key(block, expkeys[r])
-            _mix_columns_inv(block)
-
-        _shift_rows_inv(block)
-        _sub_bytes_inv(block)
-        _add_round_key(block, expkeys[0])
-
-        # writable.write(_block2bytes(block))
+            _add_round_key(block, expkeys[0])
 
 
 # main program
