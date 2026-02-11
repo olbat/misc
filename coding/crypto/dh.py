@@ -29,8 +29,8 @@ examples:
 #     http://www.ietf.org/rfc/rfc5114.txt
 
 
+from os import urandom
 from collections import namedtuple
-from random import getrandbits
 
 DHGroup = namedtuple('DHGroup', ['g', 'p', 'desc'])
 
@@ -299,7 +299,7 @@ def generate_private_key(size):
     '''
     Generate a private key of _size_ bits
     '''
-    return getrandbits(size)
+    return int.from_bytes(urandom(size // 8))
 
 
 def generate_public_key(g, p, private_key):

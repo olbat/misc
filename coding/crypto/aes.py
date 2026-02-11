@@ -17,7 +17,7 @@ examples:
 #     https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.197.pdf
 #     https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38a.pdf
 
-from random import getrandbits
+from os import urandom
 from io import SEEK_CUR
 from enum import Enum
 
@@ -418,7 +418,7 @@ def _encrypt_moo(readable, writable, moo, iv=None):
 
     if moo != MoO.ECB:
         if not iv:
-            iv = getrandbits(16 * 8).to_bytes(16, 'little', signed=False)
+            iv = urandom(16)
         writable.write(bytes(iv))
 
     if moo == MoO.CTR:
@@ -570,9 +570,9 @@ def genkey(size):
     if ssize not in KEY_TYPES:
         raise ValueError
 
-    key = getrandbits(KEY_TYPES[ssize]["size"])
+    key = urandom(KEY_TYPES[ssize]["size"] // 8)
 
-    return key.to_bytes(size // 8, 'little', signed=False)
+    return key
 
 
 def encrypt(readable, writable, key, moo=MoO.CBC, iv=None):
