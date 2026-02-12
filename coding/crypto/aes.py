@@ -555,7 +555,12 @@ def _decrypt_moo(readable, writable, moo):
             # PKCS#7 padding
             # (see https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7)
             if ((moo == MoO.ECB) or (moo == MoO.CBC)) and last_block:
-                bs = bs[:-bs[-1]]
+                pad_len = bs[-1]
+                if pad_len < 1 or pad_len > NB * NB:
+                    raise ValueError("invalid PKCS#7 padding")
+                if bs[-pad_len:] != bytes([pad_len] * pad_len):
+                    raise ValueError("invalid PKCS#7 padding")
+                bs = bs[:-pad_len]
             else:
                 bs = bytes(bs)
 

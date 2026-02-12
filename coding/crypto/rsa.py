@@ -40,6 +40,10 @@ AES_KEY_SIZE = 256
 SHA2_DIGEST = "SHA512_256"
 BUF_SIZE = 4096
 
+# see https://crypto.stackexchange.com/a/3113,
+# and https://www.rfc-editor.org/rfc/rfc6376#section-3.3.1
+RSA_STANDARD_PUBLIC_EXPONENT = 65537
+
 
 class BadKeyError(Exception):
     """
@@ -106,7 +110,7 @@ def genkeys(p, q):
 
     n = p * q  # modulus
 
-    e = 65537  # public exponent (see https://crypto.stackexchange.com/a/3113)
+    e = RSA_STANDARD_PUBLIC_EXPONENT
     # calculate the exponent using Euler's totient (Φ) instead of the
     # Carmichael (λ) one (easier implementation)
     # see https://en.wikipedia.org/wiki/RSA_(cryptosystem)#Key_generation
