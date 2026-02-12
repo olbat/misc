@@ -9,7 +9,7 @@ modes:
 examples:
   # generate the RSA key pair for the server (takes two primes as input)
   {{ openssl prime --generate --bits 1024 \\
-  && openssl prime --generate --bits 1024; }} | python {0} genkeys
+  & openssl prime --generate --bits 1024; }} | python {0} genkeys
 
   # alternative: enter primes interactively
   python {0} genkeys < PRIMES
@@ -63,7 +63,6 @@ class MsgType(Enum):
     CLIENT_FINISHED = "ClientFinished"
     SERVER_FINISHED = "ServerFinished"
 
-RSA_STANDARD_PUBLIC_EXPONENT = 65537
 DH_GROUP_ID = 1  # 2048-bit MODP Group (RFC 3526)
 DH_KEY_SIZE = 256  # bits
 AES_KEY_SIZE = 256  # bits
@@ -232,14 +231,11 @@ class TinyTLSConnection:
         self._recv_mac_key = c_mac
 
         # 5. Finished: verify client's HMAC of transcript then send ours
+        transcript_len = len(self._transcript)
         client_finished = self._recv_handshake()
         if client_finished.get("type") != MsgType.CLIENT_FINISHED.value:
             raise TinyTLSHandshakeError("expected ClientFinished")
-        # the transcript includes the ClientFinished message itself, so
-        # reconstruct the transcript *before* it was appended
-        transcript_before_cf = self._transcript[:-len(
-            json.dumps(client_finished, sort_keys=True).encode())]
-        expected_client_verify = _hmac(c_mac, transcript_before_cf)
+        expected_client_verify = _hmac(c_mac, self._transcript[:transcript_len])
         if not _constant_time_compare(
                 bytes.fromhex(client_finished["verify"]),
                 expected_client_verify):
@@ -337,13 +333,11 @@ class TinyTLSConnection:
             "verify": client_verify.hex(),
         })
 
+        transcript_len = len(self._transcript)
         server_finished = self._recv_handshake()
         if server_finished.get("type") != MsgType.SERVER_FINISHED.value:
             raise TinyTLSHandshakeError("expected ServerFinished")
-        # verify server's HMAC: computed over transcript before ServerFinished
-        transcript_before_sf = self._transcript[:-len(
-            json.dumps(server_finished, sort_keys=True).encode())]
-        expected_server_verify = _hmac(s_mac, transcript_before_sf)
+        expected_server_verify = _hmac(s_mac, self._transcript[:transcript_len])
         if not _constant_time_compare(
                 bytes.fromhex(server_finished["verify"]),
                 expected_server_verify):
@@ -516,7 +510,8 @@ if __name__ == "__main__":
         with open(rsa.PUBKEY_FILE, "w") as f:
             f.write(rsa.dumpkey(n, e))
         with open(rsa.PRIVKEY_FILE, "w") as f:
-            f.write(rsa.dumpkey(n, d))
+            # store n, e, d so the server can recover e without guessing
+            f.write("{} {} {}".format(hex(n), hex(e), hex(d)))
         print("wrote keys to {} and {}".format(rsa.PUBKEY_FILE,
                                                rsa.PRIVKEY_FILE),
               file=sys.stderr)
@@ -528,8 +523,7 @@ if __name__ == "__main__":
 
         host, port, keyfile = sys.argv[2], int(sys.argv[3]), sys.argv[4]
         with open(keyfile) as f:
-            n, d = rsa.loadkey(f.read())
-        e = RSA_STANDARD_PUBLIC_EXPONENT
+            n, e, d = [int(v, 16) for v in f.read().split()]
 
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
