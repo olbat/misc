@@ -1,0 +1,303 @@
+#!/usr/bin/env bpftrace
+/*
+ * trace-suspicious.bt
+ *
+ * Monitor suspicious or potentially abusive operations performed by a
+ * process and its descendants. Designed to catch AI coding agents
+ * overstepping their boundaries.
+ *
+ * Categories of suspicious activity:
+ *   - Credential/secret access (reading SSH keys, tokens, .env files)
+ *   - Privilege escalation (setuid, setgid, capability changes)
+ *   - Persistence mechanisms (crontabs, systemd units, shell rc files)
+ *   - System manipulation (ptrace, kernel modules, mounts)
+ *   - Covert execution (memfd_create, raw sockets)
+ *   - Permission manipulation (setting setuid/setgid bits)
+ *
+ * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
+ * Usage: sudo bpftrace trace-suspicious.bt <PID>
+ */
+
+// Log an event with a single string detail
+macro log_event(event, detail) {
+    printf("%s.%03d      %-10s %s\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        event, detail);
+}
+
+BEGIN
+{
+    if ($1 == 0) {
+        printf("Usage: sudo bpftrace trace-suspicious.bt <PID>\n");
+        exit();
+    }
+    printf("Monitoring suspicious operations of PID %d (and their children)...\n", $1);
+    printf("%-20s %-10s %s\n", "TIME", "EVENT", "DETAILS");
+    printf("%-20s %-10s %s\n", "----", "-----", "-------");
+
+    @root_pid = $1;
+    @watched[($1)] = 1;
+}
+
+tracepoint:sched:sched_process_fork
+{
+    if (@watched[(int64)pid]) {
+        @watched[args->child_pid] = 1;
+    }
+}
+
+// ========================================================================
+// Credential / secret access
+// ========================================================================
+// An AI coding agent should not be reading SSH private keys, cloud
+// credentials, API tokens, or password files. Fires on openat() of paths
+// matching known sensitive locations.
+
+// Capture path (clamped to 64 bytes to keep BPF verifier happy) and flags.
+// Tag writable opens so downstream probes can check a simple flag.
+tracepoint:syscalls:sys_enter_openat
+/@watched[(int64)pid]/
+{
+    @open_path[tid] = str(args->filename, 64);
+    @open_write[tid] = (args->flags & 3) > 0 || (args->flags & 0x40) ? 1 : 0;
+}
+
+// --- Credential / secret files (1/2) ---
+// SSH keys, GPG keyrings, cloud credentials, GitHub CLI tokens.
+// A coding agent has no business reading these.
+tracepoint:syscalls:sys_exit_openat
+/@open_path[tid] != ""/
+{
+    $path = @open_path[tid];
+    if (strcontains($path, ".ssh/") ||
+        strcontains($path, ".gnupg/") ||
+        strcontains($path, ".aws/") ||
+        strcontains($path, ".config/gh/")) {
+        log_event("!SECRET", $path)
+    }
+}
+
+// --- Credential / secret files (2/2) ---
+// .env files, token/secret/credential files, .netrc, /etc/shadow.
+tracepoint:syscalls:sys_exit_openat
+/@open_path[tid] != ""/
+{
+    $path = @open_path[tid];
+    if (strcontains($path, ".env") ||
+        strcontains($path, "token") ||
+        strcontains($path, "secret") ||
+        strcontains($path, ".netrc")) {
+        log_event("!SECRET", $path)
+    }
+}
+
+// --- Persistence: cron / systemd writes ---
+// Writing to cron or systemd directories installs commands that persist
+// and run after the agent exits.
+tracepoint:syscalls:sys_exit_openat
+/@open_write[tid]/
+{
+    $path = @open_path[tid];
+    if (strcontains($path, "/etc/cron") ||
+        strcontains($path, "/spool/cron/") ||
+        strcontains($path, "/etc/systemd/") ||
+        strcontains($path, "systemd/user/")) {
+        log_event("!PERSIST", $path)
+    }
+}
+
+// --- Persistence: shell startup file writes ---
+// Modifying .bashrc, .zshrc, .profile etc. lets an agent inject commands
+// that run every time the user opens a shell.
+tracepoint:syscalls:sys_exit_openat
+/@open_write[tid]/
+{
+    $path = @open_path[tid];
+    if (strcontains($path, ".bashrc") ||
+        strcontains($path, ".bash_profile") ||
+        strcontains($path, ".zshrc") ||
+        strcontains($path, ".profile")) {
+        log_event("!SHRC_W", $path)
+    }
+
+    delete(@open_path[tid]);
+    delete(@open_write[tid]);
+}
+
+// ========================================================================
+// Privilege escalation
+// ========================================================================
+// A coding agent should never need to change its user/group identity or
+// modify its process capabilities.
+
+// setuid / setgid — attempt to change effective user or group ID.
+// Used legitimately by login/su/sudo, never by a coding assistant.
+tracepoint:syscalls:sys_enter_setuid
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s uid=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!SETUID", args->uid);
+}
+
+tracepoint:syscalls:sys_enter_setgid
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s gid=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!SETGID", args->gid);
+}
+
+// setresuid / setresgid — set real, effective, and saved user/group IDs.
+// More powerful variant of setuid/setgid, same concern.
+tracepoint:syscalls:sys_enter_setresuid
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s ruid=%d euid=%d suid=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!SETRESUID", args->ruid, args->euid, args->suid);
+}
+
+tracepoint:syscalls:sys_enter_setresgid
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s rgid=%d egid=%d sgid=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!SETRESGID", args->rgid, args->egid, args->sgid);
+}
+
+// capset — modify process capabilities (e.g. granting CAP_NET_RAW,
+// CAP_SYS_ADMIN). Could allow privilege escalation without full root.
+tracepoint:syscalls:sys_enter_capset
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s pid=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!CAPSET", pid);
+}
+
+// ========================================================================
+// System manipulation
+// ========================================================================
+
+// ptrace — attach to another process for debugging or code injection.
+// This is how debuggers and process injectors work. An AI agent has no
+// legitimate reason to ptrace anything.
+tracepoint:syscalls:sys_enter_ptrace
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s request=%ld target_pid=%ld\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!PTRACE", args->request, args->pid);
+}
+
+// mount / umount — mounting filesystems can be used to overlay system
+// binaries, hide files, or access restricted devices.
+tracepoint:syscalls:sys_enter_mount
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s %s on %s type %s\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!MOUNT", str(args->dev_name), str(args->dir_name), str(args->type));
+}
+
+tracepoint:syscalls:sys_enter_umount
+/@watched[(int64)pid]/
+{
+    log_event("!UMOUNT", str(args->name))
+}
+
+// init_module / finit_module — loading kernel modules gives full kernel
+// access. This is the most extreme form of system compromise.
+tracepoint:syscalls:sys_enter_init_module
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s size=%lu\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!KMOD", args->len);
+}
+
+tracepoint:syscalls:sys_enter_finit_module
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s fd=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!KMOD", args->fd);
+}
+
+// sethostname / setdomainname — changing the system's identity is not
+// something a coding agent should ever do.
+tracepoint:syscalls:sys_enter_sethostname
+/@watched[(int64)pid]/
+{
+    log_event("!SETHOST", str(args->name))
+}
+
+tracepoint:syscalls:sys_enter_setdomainname
+/@watched[(int64)pid]/
+{
+    log_event("!SETDOM", str(args->name))
+}
+
+// ========================================================================
+// Covert execution
+// ========================================================================
+
+// memfd_create — creates an anonymous file in memory. Commonly used by
+// malware to load and execute code without ever touching the filesystem,
+// evading file-based detection.
+tracepoint:syscalls:sys_enter_memfd_create
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s name=%s flags=0x%x\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!MEMFD", str(args->uname), args->flags);
+}
+
+// socket with SOCK_RAW (type 3) — raw sockets allow crafting arbitrary
+// network packets, used for network scanning, spoofing, or covert channels.
+tracepoint:syscalls:sys_enter_socket
+/@watched[(int64)pid] && args->type == 3/
+{
+    printf("%s.%03d      %-10s family=%d protocol=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!RAW_SOCK", args->family, args->protocol);
+}
+
+// ========================================================================
+// Permission manipulation
+// ========================================================================
+
+// fchmodat with setuid (04000) or setgid (02000) bits — creating setuid
+// binaries is a classic privilege escalation technique. An agent could
+// compile a helper binary and make it setuid-root.
+tracepoint:syscalls:sys_enter_fchmodat
+/@watched[(int64)pid] && (args->mode & 06000)/
+{
+    printf("%s.%03d      %-10s %s (mode %o — setuid/setgid!)\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!SUID_CHM", str(args->filename), args->mode);
+}
+
+// --- Process tracking ---
+
+tracepoint:sched:sched_process_exit
+/(@watched[(int64)pid]) && tid == pid/
+{
+    delete(@watched[(int64)pid]);
+}
+
+tracepoint:sched:sched_process_exit
+/(tid == (uint64)@root_pid)/
+{
+    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
+    exit();
+}
+
+END
+{
+    clear(@watched);
+    clear(@open_path);
+    clear(@open_write);
+    delete(@root_pid);
+}

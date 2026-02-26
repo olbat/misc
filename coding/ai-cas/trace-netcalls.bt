@@ -1,0 +1,467 @@
+#!/usr/bin/env bpftrace
+/*
+ * trace-ai-coding-agent-netcalls.bt
+ *
+ * Monitor outbound network calls (TCP connect, DNS lookups, data transfer)
+ * made by a specific process and its descendants.
+ *
+ * Consecutive TCP send/receive events for the same connection are aggregated
+ * into a single line showing total bytes and call count.
+ *
+ * Uses kernel-side tracepoints and kprobes with BTF struct access to avoid
+ * user-space pointer reads that silently fail on kernel 5.5+
+ * (bpf_probe_read vs bpf_probe_read_user).
+ *
+ * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
+ * Usage: sudo bpftrace trace-ai-coding-agent-netcalls.bt <PID>
+ */
+
+// --- Macros ---
+
+// Network to host byte order for 16-bit values
+macro ntohs(raw) { ((raw >> 8) | ((raw & 0xff) << 8)) }
+
+// Print a TCP event using sock struct fields (IPv6 only, IPv4 uses aggregation)
+macro log_sock_event_v6($sk, event, size) {
+    $raw = $sk->__sk_common.skc_dport;
+    $dport = ($raw >> 8) | (($raw & 0xff) << 8);
+    $ms = (nsecs % 1000000000) / 1000000;
+    printf("%s.%03d      %-10s [%s]:%d (%d bytes)\n",
+        strftime("%H:%M:%S", nsecs), $ms,
+        event, ntop(10, $sk->__sk_common.skc_v6_daddr.in6_u.u6_addr8), $dport, size);
+}
+
+// Print an aggregated IPv4 TCP event (no map access — all values passed as args)
+macro print_agg($time, $type, $ip, $dport, $host, $bytes, $count) {
+    $ms = ($time % 1000000000) / 1000000;
+    if ($host != "") {
+        if ($count > 1) {
+            printf("%s.%03d      %-10s %s:%d [%s] (%d bytes, %d calls)\n",
+                strftime("%H:%M:%S", $time), $ms, $type,
+                $ip, $dport, $host, $bytes, $count);
+        } else {
+            printf("%s.%03d      %-10s %s:%d [%s] (%d bytes)\n",
+                strftime("%H:%M:%S", $time), $ms, $type,
+                $ip, $dport, $host, $bytes);
+        }
+    } else {
+        if ($count > 1) {
+            printf("%s.%03d      %-10s %s:%d (%d bytes, %d calls)\n",
+                strftime("%H:%M:%S", $time), $ms, $type,
+                $ip, $dport, $bytes, $count);
+        } else {
+            printf("%s.%03d      %-10s %s:%d (%d bytes)\n",
+                strftime("%H:%M:%S", $time), $ms, $type,
+                $ip, $dport, $bytes);
+        }
+    }
+}
+
+// Print an IPv4 UDP event (DNS or TX_UDP).
+// Resolves destination from msg_name (unconnected) or sock (connected).
+// msg_name is kernel-space at kprobe:udp_sendmsg (copied by move_addr_to_kernel).
+macro log_udp4($sk, $msg, size) {
+    $ms = (nsecs % 1000000000) / 1000000;
+    if ($msg->msg_name != 0) {
+        $name = (uint64)$msg->msg_name;
+        $port = (*(uint8 *)($name + 2) << 8) | *(uint8 *)($name + 3);
+        if ($port == 53) {
+            printf("%s.%03d      %-10s %s:53 (%d bytes)\n",
+                strftime("%H:%M:%S", nsecs), $ms, "DNS",
+                ntop(2, *(uint32 *)($name + 4)), size);
+        } else {
+            printf("%s.%03d      %-10s %s:%d (%d bytes)\n",
+                strftime("%H:%M:%S", nsecs), $ms, "TX_UDP",
+                ntop(2, *(uint32 *)($name + 4)), $port, size);
+        }
+    } else {
+        $raw = $sk->__sk_common.skc_dport;
+        $port2 = ($raw >> 8) | (($raw & 0xff) << 8);
+        if ($port2 == 53) {
+            printf("%s.%03d      %-10s %s:53 (%d bytes)\n",
+                strftime("%H:%M:%S", nsecs), $ms, "DNS",
+                ntop(2, $sk->__sk_common.skc_daddr), size);
+        } else {
+            printf("%s.%03d      %-10s %s:%d (%d bytes)\n",
+                strftime("%H:%M:%S", nsecs), $ms, "TX_UDP",
+                ntop(2, $sk->__sk_common.skc_daddr), $port2, size);
+        }
+    }
+}
+
+// Print an IPv6 UDP event (DNS or TX_UDP)
+macro log_udp6($sk, $msg, size) {
+    $ms = (nsecs % 1000000000) / 1000000;
+    if ($msg->msg_name != 0) {
+        $name = (uint64)$msg->msg_name;
+        $port = (*(uint8 *)($name + 2) << 8) | *(uint8 *)($name + 3);
+        // sockaddr_in6: sin6_addr at offset 8, 16 bytes
+        if ($port == 53) {
+            printf("%s.%03d      %-10s [%s]:53 (%d bytes)\n",
+                strftime("%H:%M:%S", nsecs), $ms, "DNS",
+                ntop(10, $name + 8), size);
+        } else {
+            printf("%s.%03d      %-10s [%s]:%d (%d bytes)\n",
+                strftime("%H:%M:%S", nsecs), $ms, "TX_UDP",
+                ntop(10, $name + 8), $port, size);
+        }
+    } else {
+        $raw = $sk->__sk_common.skc_dport;
+        $port2 = ($raw >> 8) | (($raw & 0xff) << 8);
+        if ($port2 == 53) {
+            printf("%s.%03d      %-10s [%s]:53 (%d bytes)\n",
+                strftime("%H:%M:%S", nsecs), $ms, "DNS",
+                ntop(10, $sk->__sk_common.skc_v6_daddr.in6_u.u6_addr8), size);
+        } else {
+            printf("%s.%03d      %-10s [%s]:%d (%d bytes)\n",
+                strftime("%H:%M:%S", nsecs), $ms, "TX_UDP",
+                ntop(10, $sk->__sk_common.skc_v6_daddr.in6_u.u6_addr8), $port2, size);
+        }
+    }
+}
+
+// --- Probes ---
+
+BEGIN
+{
+    if ($1 == 0) {
+        printf("Usage: sudo bpftrace trace-ai-coding-agent-netcalls.bt <PID>\n");
+        exit();
+    }
+    printf("Monitoring network calls of PID %d (and their children)...\n", $1);
+    printf("%-20s %-10s %s\n", "TIME", "EVENT", "DETAILS");
+    printf("%-20s %-10s %s\n", "----", "-----", "-------");
+
+    @root_pid = $1;
+    @watched[($1)] = 1;
+}
+
+tracepoint:sched:sched_process_fork
+{
+    if (@watched[(int64)pid]) {
+        @watched[args->child_pid] = 1;
+    }
+}
+
+/*
+ * Hostname resolution — uprobe on libc's getaddrinfo.
+ * Adjust the libc path below if not on Arch Linux:
+ *   Debian/Ubuntu: /lib/x86_64-linux-gnu/libc.so.6
+ *   Fedora/RHEL:   /lib64/libc.so.6
+ */
+uprobe:/usr/lib/libc.so.6:getaddrinfo
+/@watched[(int64)pid]/
+{
+    // Flush pending aggregation
+    if (@agg_count[pid] > 0) {
+        $a_daddr = @agg_daddr[pid];
+        $a_dport = @agg_dport[pid];
+        $a_bytes = @agg_bytes[pid];
+        $a_count = @agg_count[pid];
+        $a_time = @agg_time[pid];
+        $a_host = @host_by_ip[@agg_ip[pid]];
+        $a_type = "TX_TCP";
+        if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+        $a_ip = @agg_ip[pid];
+        print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+        @agg_count[pid] = 0;
+    }
+
+    printf("%s.%03d      %-10s %s\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "RESOLVE", str(arg0));
+    @resolve_host[pid] = str(arg0);
+}
+
+// TCP connect via socket state change (newstate 2 = TCP_SYN_SENT)
+tracepoint:sock:inet_sock_set_state
+/args->newstate == 2 && @watched[(int64)pid]/
+{
+    // Flush pending aggregation
+    if (@agg_count[pid] > 0) {
+        $a_daddr = @agg_daddr[pid];
+        $a_dport = @agg_dport[pid];
+        $a_bytes = @agg_bytes[pid];
+        $a_count = @agg_count[pid];
+        $a_time = @agg_time[pid];
+        $a_host = @host_by_ip[@agg_ip[pid]];
+        $a_type = "TX_TCP";
+        if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+        $a_ip = @agg_ip[pid];
+        print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+        @agg_count[pid] = 0;
+    }
+
+    $ms = (nsecs % 1000000000) / 1000000;
+    if (args->family == 2) {
+        $daddr = (uint32)args->daddr[0] | ((uint32)args->daddr[1] << 8)
+            | ((uint32)args->daddr[2] << 16) | ((uint32)args->daddr[3] << 24);
+        if (@resolve_host[pid] != "") {
+            @ip_to_host[$daddr] = @resolve_host[pid];
+            @host_by_ip[ntop(2, args->daddr)] = @resolve_host[pid];
+        }
+        if (@ip_to_host[$daddr] != "") {
+            printf("%s.%03d      %-10s %s:%d [%s]\n",
+                strftime("%H:%M:%S", nsecs), $ms,
+                "CONNECT", ntop(2, args->daddr), args->dport,
+                @ip_to_host[$daddr]);
+        } else {
+            printf("%s.%03d      %-10s %s:%d\n",
+                strftime("%H:%M:%S", nsecs), $ms,
+                "CONNECT", ntop(2, args->daddr), args->dport);
+        }
+    }
+    else if (args->family == 10) {
+        printf("%s.%03d      %-10s [%s]:%d\n",
+            strftime("%H:%M:%S", nsecs), $ms,
+            "CONNECT", ntop(10, args->daddr_v6), args->dport);
+    }
+}
+
+// TCP disconnect via socket state change (newstate 7 = TCP_CLOSE)
+tracepoint:sock:inet_sock_set_state
+/args->newstate == 7 && @watched[(int64)pid]/
+{
+    // Flush pending aggregation
+    if (@agg_count[pid] > 0) {
+        $a_daddr = @agg_daddr[pid];
+        $a_dport = @agg_dport[pid];
+        $a_bytes = @agg_bytes[pid];
+        $a_count = @agg_count[pid];
+        $a_time = @agg_time[pid];
+        $a_host = @host_by_ip[@agg_ip[pid]];
+        $a_type = "TX_TCP";
+        if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+        $a_ip = @agg_ip[pid];
+        print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+        @agg_count[pid] = 0;
+    }
+
+    $ms = (nsecs % 1000000000) / 1000000;
+    if (args->family == 2) {
+        $ip = ntop(2, args->daddr);
+        if (@host_by_ip[$ip] != "") {
+            printf("%s.%03d      %-10s %s:%d [%s]\n",
+                strftime("%H:%M:%S", nsecs), $ms,
+                "CLOSE", $ip, args->dport, @host_by_ip[$ip]);
+        } else {
+            printf("%s.%03d      %-10s %s:%d\n",
+                strftime("%H:%M:%S", nsecs), $ms,
+                "CLOSE", $ip, args->dport);
+        }
+    }
+    else if (args->family == 10) {
+        printf("%s.%03d      %-10s [%s]:%d\n",
+            strftime("%H:%M:%S", nsecs), $ms,
+            "CLOSE", ntop(10, args->daddr_v6), args->dport);
+    }
+}
+
+// --- TCP data transfer (aggregated) ---
+// Consecutive events for the same connection+direction are merged into one line.
+// @agg_type: 1=TX_TCP, 2=RX_TCP (0=no pending aggregation)
+
+kprobe:tcp_sendmsg
+/@watched[(int64)pid]/
+{
+    $sk = (struct sock *)arg0;
+    $family = $sk->__sk_common.skc_family;
+    $size = (uint64)arg2;
+
+    if ($family == 2) {
+        $daddr = $sk->__sk_common.skc_daddr;
+        $raw = $sk->__sk_common.skc_dport;
+        $dport = ($raw >> 8) | (($raw & 0xff) << 8);
+
+        if (@agg_type[pid] == 1 && @agg_daddr[pid] == $daddr && @agg_dport[pid] == $dport) {
+            // Same connection, same direction: accumulate
+            @agg_bytes[pid] += $size;
+            @agg_count[pid]++;
+        } else {
+            // Different: flush previous, start new
+            if (@agg_count[pid] > 0) {
+                $a_daddr = @agg_daddr[pid];
+                $a_dport = @agg_dport[pid];
+                $a_bytes = @agg_bytes[pid];
+                $a_count = @agg_count[pid];
+                $a_time = @agg_time[pid];
+                $a_host = @host_by_ip[@agg_ip[pid]];
+                $a_type = "TX_TCP";
+                if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+                $a_ip = @agg_ip[pid];
+                print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+            }
+            @agg_type[pid] = 1;
+            @agg_daddr[pid] = $daddr;
+            @agg_ip[pid] = ntop(2, $daddr);
+            @agg_dport[pid] = $dport;
+            @agg_bytes[pid] = $size;
+            @agg_count[pid] = 1;
+            @agg_time[pid] = nsecs;
+        }
+    } else if ($family == 10) {
+        // Flush pending IPv4 aggregation, print IPv6 immediately
+        if (@agg_count[pid] > 0) {
+            $a_daddr = @agg_daddr[pid];
+            $a_dport = @agg_dport[pid];
+            $a_bytes = @agg_bytes[pid];
+            $a_count = @agg_count[pid];
+            $a_time = @agg_time[pid];
+            $a_host = @host_by_ip[@agg_ip[pid]];
+            $a_type = "TX_TCP";
+            if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+            $a_ip = @agg_ip[pid];
+            print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+            @agg_count[pid] = 0;
+        }
+        log_sock_event_v6($sk, "TX_TCP", $size)
+    }
+}
+
+kprobe:tcp_cleanup_rbuf
+/@watched[(int64)pid]/
+{
+    $sk = (struct sock *)arg0;
+    $sz = (int64)arg1;
+    if ($sz > 0) {
+        $family = $sk->__sk_common.skc_family;
+
+        if ($family == 2) {
+            $daddr = $sk->__sk_common.skc_daddr;
+            $raw = $sk->__sk_common.skc_dport;
+            $dport = ($raw >> 8) | (($raw & 0xff) << 8);
+
+            if (@agg_type[pid] == 2 && @agg_daddr[pid] == $daddr && @agg_dport[pid] == $dport) {
+                @agg_bytes[pid] += (uint64)$sz;
+                @agg_count[pid]++;
+            } else {
+                if (@agg_count[pid] > 0) {
+                    $a_daddr = @agg_daddr[pid];
+                    $a_dport = @agg_dport[pid];
+                    $a_bytes = @agg_bytes[pid];
+                    $a_count = @agg_count[pid];
+                    $a_time = @agg_time[pid];
+                    $a_host = @host_by_ip[@agg_ip[pid]];
+                    $a_type = "TX_TCP";
+                    if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+                    $a_ip = @agg_ip[pid];
+                    print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+                }
+                @agg_type[pid] = 2;
+                @agg_daddr[pid] = $daddr;
+                @agg_ip[pid] = ntop(2, $daddr);
+                @agg_dport[pid] = $dport;
+                @agg_bytes[pid] = (uint64)$sz;
+                @agg_count[pid] = 1;
+                @agg_time[pid] = nsecs;
+            }
+        } else if ($family == 10) {
+            if (@agg_count[pid] > 0) {
+                $a_daddr = @agg_daddr[pid];
+                $a_dport = @agg_dport[pid];
+                $a_bytes = @agg_bytes[pid];
+                $a_count = @agg_count[pid];
+                $a_time = @agg_time[pid];
+                $a_host = @host_by_ip[@agg_ip[pid]];
+                $a_type = "TX_TCP";
+                if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+                $a_ip = @agg_ip[pid];
+                print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+                @agg_count[pid] = 0;
+            }
+            log_sock_event_v6($sk, "RX_TCP", $sz)
+        }
+    }
+}
+
+kprobe:udp_sendmsg
+/@watched[(int64)pid]/
+{
+    // Flush pending aggregation
+    if (@agg_count[pid] > 0) {
+        $a_daddr = @agg_daddr[pid];
+        $a_dport = @agg_dport[pid];
+        $a_bytes = @agg_bytes[pid];
+        $a_count = @agg_count[pid];
+        $a_time = @agg_time[pid];
+        $a_host = @host_by_ip[@agg_ip[pid]];
+        $a_type = "TX_TCP";
+        if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+        $a_ip = @agg_ip[pid];
+        print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+        @agg_count[pid] = 0;
+    }
+
+    $sk = (struct sock *)arg0;
+    $msg = (struct msghdr *)arg1;
+    log_udp4($sk, $msg, (uint64)arg2)
+}
+
+kprobe:udpv6_sendmsg
+/@watched[(int64)pid]/
+{
+    // Flush pending aggregation
+    if (@agg_count[pid] > 0) {
+        $a_daddr = @agg_daddr[pid];
+        $a_dport = @agg_dport[pid];
+        $a_bytes = @agg_bytes[pid];
+        $a_count = @agg_count[pid];
+        $a_time = @agg_time[pid];
+        $a_host = @host_by_ip[@agg_ip[pid]];
+        $a_type = "TX_TCP";
+        if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+        $a_ip = @agg_ip[pid];
+        print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+        @agg_count[pid] = 0;
+    }
+
+    $sk = (struct sock *)arg0;
+    $msg = (struct msghdr *)arg1;
+    log_udp6($sk, $msg, (uint64)arg2)
+}
+
+// Stop watching processes that have exited (only when main thread exits)
+tracepoint:sched:sched_process_exit
+/(@watched[(int64)pid]) && tid == pid/
+{
+    // Flush pending aggregation for this process
+    if (@agg_count[pid] > 0) {
+        $a_daddr = @agg_daddr[pid];
+        $a_dport = @agg_dport[pid];
+        $a_bytes = @agg_bytes[pid];
+        $a_count = @agg_count[pid];
+        $a_time = @agg_time[pid];
+        $a_host = @host_by_ip[@agg_ip[pid]];
+        $a_type = "TX_TCP";
+        if (@agg_type[pid] != 1) { $a_type = "RX_TCP"; }
+        $a_ip = @agg_ip[pid];
+        print_agg($a_time, $a_type, $a_ip, $a_dport, $a_host, $a_bytes, $a_count);
+        @agg_count[pid] = 0;
+    }
+
+    delete(@watched[(int64)pid]);
+}
+
+// Exit when the root process's main thread exits
+tracepoint:sched:sched_process_exit
+/(tid == (uint64)@root_pid)/
+{
+    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
+    exit();
+}
+
+END
+{
+    clear(@watched);
+    clear(@ip_to_host);
+    clear(@host_by_ip);
+    clear(@resolve_host);
+    clear(@agg_type);
+    clear(@agg_daddr);
+    clear(@agg_ip);
+    clear(@agg_dport);
+    clear(@agg_bytes);
+    clear(@agg_count);
+    clear(@agg_time);
+    delete(@root_pid);
+}
