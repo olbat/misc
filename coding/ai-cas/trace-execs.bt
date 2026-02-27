@@ -1,0 +1,64 @@
+#!/usr/bin/env bpftrace
+/*
+ * monitor_subprocesses.bt
+ *
+ * Monitor sub-processes spawned by a specific process (and its descendants).
+ * For each exec() call, print the timestamp, PID, and full command with args.
+ *
+ * Usage: sudo bpftrace monitor_subprocesses.bt <PID>
+ */
+
+BEGIN
+{
+    if ($1 == 0) {
+        printf("Usage: sudo bpftrace monitor_subprocesses.bt <PID>\n");
+        exit();
+    }
+    printf("Monitoring subprocesses of PID %d (and their children)...\n", $1);
+    printf("%-20s %-10s %s\n", "TIME", "EVENT", "DETAILS");
+    printf("%-20s %-10s %s\n", "----", "-----", "-------");
+
+    // Track the root PID to monitor
+    @root_pid = $1;
+    // Seed the watched set with the root PID
+    @watched[($1)] = 1;
+}
+
+// Track new processes: if the parent is watched, watch the child too
+tracepoint:sched:sched_process_fork
+{
+    if (@watched[args->parent_pid]) {
+        @watched[args->child_pid] = 1;
+    }
+}
+
+// On exec, if the process is watched, log the command
+tracepoint:syscalls:sys_enter_execve
+/(@watched[(int64)pid])/
+{
+    printf("%s.%03d      %-10s ",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "EXEC");
+    join(args->argv);
+}
+
+// Stop watching processes that have exited (only when main thread exits)
+tracepoint:sched:sched_process_exit
+/(@watched[(int64)pid]) && tid == pid/
+{
+    delete(@watched[(int64)pid]);
+}
+
+// If the root process exits, clean up and exit
+tracepoint:sched:sched_process_exit
+/(tid == (uint64)@root_pid)/
+{
+    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
+    exit();
+}
+
+END
+{
+    clear(@watched);
+    delete(@root_pid);
+}
