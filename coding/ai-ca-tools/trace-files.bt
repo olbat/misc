@@ -1,8 +1,8 @@
 #!/usr/bin/env bpftrace
 /*
- * trace-ai-coding-agent-files.bt
+ * trace-files.bt
  *
- * Monitor file operations (open, read, write, delete, rename) made by a
+ * Monitor file operations (open, read, write, mkdir, delete, rename) made by a
  * specific process and its descendants.
  *
  * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
@@ -95,6 +95,17 @@ tracepoint:syscalls:sys_enter_close
 /@watched[(int64)pid] && @fd_to_path[pid, (int64)args->fd] != ""/
 {
     delete(@fd_to_path[pid, (int64)args->fd]);
+}
+
+// --- Directory create ---
+
+tracepoint:syscalls:sys_enter_mkdirat
+/@watched[(int64)pid]/
+{
+    $ms = (nsecs % 1000000000) / 1000000;
+    printf("%s.%03d      %-10s %s (mode %o)\n",
+        strftime("%H:%M:%S", nsecs), $ms, "MKDIR",
+        str(args->pathname), args->mode);
 }
 
 // --- File delete ---
