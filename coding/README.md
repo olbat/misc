@@ -11,6 +11,7 @@
 | [realtimeclock](realtimeclock) | GNU/Linux kernel module that read the current time from the CMOS |
 | [jitpoc](jitpoc) | Very minimal JIT compilation PoC |
 | [apidoc](apidoc) | REST API documentation generator |
+| [ai-ca-tools](ai-ca-tools) | AI coding agent supervision & monitoring tools |
 | [ruby-benchs](ruby-benchs) | Small dummy benchs on Ruby standard lib components |
 | [misc/fork_chain.rb](misc/fork_chain.rb) | A fork+pipe chain PoC |
 | [misc/netboot.rb](misc/netboot.rb) | PXE profile generator lib |
