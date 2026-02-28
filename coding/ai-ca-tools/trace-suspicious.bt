@@ -3,8 +3,8 @@
  * trace-suspicious.bt
  *
  * Monitor suspicious or potentially abusive operations performed by a
- * process and its descendants. Designed to catch AI coding agents
- * overstepping their boundaries.
+ * process and its descendants. Designed to catch processes performing
+ * suspicious or potentially dangerous operations.
  *
  * Categories of suspicious activity:
  *   - Credential/secret access (reading SSH keys, tokens, .env files)
@@ -25,6 +25,8 @@
  * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
  * Usage: sudo bpftrace trace-suspicious.bt <PID>
  */
+
+config { unstable_macro=enable }
 
 // Log an event with a single string detail
 macro log_event(event, detail) {
@@ -57,7 +59,7 @@ tracepoint:sched:sched_process_fork
 // ========================================================================
 // Credential / secret access
 // ========================================================================
-// An AI coding agent should not be reading SSH private keys, cloud
+// The traced process should not be reading SSH private keys, cloud
 // credentials, API tokens, or password files. Fires on openat() of paths
 // matching known sensitive locations.
 
@@ -72,7 +74,7 @@ tracepoint:syscalls:sys_enter_openat
 
 // --- Credential / secret files (1/2) ---
 // SSH keys, GPG keyrings, cloud credentials, GitHub CLI tokens.
-// A coding agent has no business reading these.
+// The traced process has no business reading these.
 tracepoint:syscalls:sys_exit_openat
 /@open_path[tid] != ""/
 {
@@ -101,7 +103,7 @@ tracepoint:syscalls:sys_exit_openat
 
 // --- Persistence: cron / systemd writes ---
 // Writing to cron or systemd directories installs commands that persist
-// and run after the agent exits.
+// and run after the process exits.
 tracepoint:syscalls:sys_exit_openat
 /@open_write[tid]/
 {
@@ -115,7 +117,7 @@ tracepoint:syscalls:sys_exit_openat
 }
 
 // --- Persistence: shell startup file writes ---
-// Modifying .bashrc, .zshrc, .profile etc. lets an agent inject commands
+// Modifying .bashrc, .zshrc, .profile etc. lets a process inject commands
 // that run every time the user opens a shell.
 tracepoint:syscalls:sys_exit_openat
 /@open_write[tid]/
@@ -135,8 +137,8 @@ tracepoint:syscalls:sys_exit_openat
 // ========================================================================
 // Privilege escalation
 // ========================================================================
-// A coding agent should never need to change its user/group identity or
-// modify its process capabilities.
+// The traced process should never need to change its user/group identity
+// or modify its process capabilities.
 
 // setuid / setgid — attempt to change effective user or group ID.
 // Used legitimately by login/su/sudo, never by a coding assistant.
@@ -189,8 +191,8 @@ tracepoint:syscalls:sys_enter_capset
 // ========================================================================
 
 // ptrace — attach to another process for debugging or code injection.
-// This is how debuggers and process injectors work. An AI agent has no
-// legitimate reason to ptrace anything.
+// This is how debuggers and process injectors work. The traced process
+// has no legitimate reason to ptrace anything.
 tracepoint:syscalls:sys_enter_ptrace
 /@watched[(int64)pid]/
 {
@@ -234,7 +236,7 @@ tracepoint:syscalls:sys_enter_finit_module
 }
 
 // sethostname / setdomainname — changing the system's identity is not
-// something a coding agent should ever do.
+// something the traced process should ever do.
 tracepoint:syscalls:sys_enter_sethostname
 /@watched[(int64)pid]/
 {
@@ -275,7 +277,7 @@ tracepoint:syscalls:sys_enter_socket
 // ========================================================================
 // Listening sockets / reverse shells
 // ========================================================================
-// An AI coding agent should not be opening listening sockets. This is a
+// The traced process should not be opening listening sockets. This is a
 // common pattern for reverse shells and C2 channels.
 
 // bind — binding to a network address to accept incoming connections.
@@ -391,7 +393,7 @@ tracepoint:syscalls:sys_enter_prctl
 }
 
 // seccomp — installing seccomp filters could block tracing or
-// monitoring of the agent process itself.
+// monitoring of the traced process itself.
 tracepoint:syscalls:sys_enter_seccomp
 /@watched[(int64)pid]/
 {
@@ -411,7 +413,7 @@ tracepoint:syscalls:sys_enter_personality
 }
 
 // userfaultfd — used in kernel race-condition exploits. No legitimate
-// use for a coding agent.
+// use for the traced process.
 tracepoint:syscalls:sys_enter_userfaultfd
 /@watched[(int64)pid]/
 {
@@ -460,7 +462,7 @@ tracepoint:syscalls:sys_enter_keyctl
 // Destructive system actions
 // ========================================================================
 
-// reboot — no agent should ever reboot the system.
+// reboot — no traced process should ever reboot the system.
 tracepoint:syscalls:sys_enter_reboot
 /@watched[(int64)pid]/
 {
@@ -484,7 +486,7 @@ tracepoint:syscalls:sys_enter_kill
 // ========================================================================
 
 // fchmodat with setuid (04000) or setgid (02000) bits — creating setuid
-// binaries is a classic privilege escalation technique. An agent could
+// binaries is a classic privilege escalation technique. A process could
 // compile a helper binary and make it setuid-root.
 tracepoint:syscalls:sys_enter_fchmodat
 /@watched[(int64)pid] && (args->mode & 06000)/

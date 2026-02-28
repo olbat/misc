@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# spy-agent.sh
+# trace-all.sh
 #
 # Runs the four individual bpftrace scripts (execs, files, netcalls,
 # suspicious) in parallel against the same target PID. Ctrl-C stops all.
@@ -23,7 +23,7 @@ cleanup() {
     kill 0 2>/dev/null
     wait 2>/dev/null
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM QUIT HUP
 
 bpftrace "$SCRIPT_DIR/trace-execs.bt" "$PID" &
 bpftrace "$SCRIPT_DIR/trace-files.bt" "$PID" &

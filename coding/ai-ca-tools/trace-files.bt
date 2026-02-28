@@ -6,13 +6,13 @@
  * specific process and its descendants.
  *
  * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
- * Usage: sudo bpftrace trace-ai-coding-agent-files.bt <PID>
+ * Usage: sudo bpftrace trace-files.bt <PID>
  */
 
 BEGIN
 {
     if ($1 == 0) {
-        printf("Usage: sudo bpftrace trace-ai-coding-agent-files.bt <PID>\n");
+        printf("Usage: sudo bpftrace trace-files.bt <PID>\n");
         exit();
     }
     printf("Monitoring file operations of PID %d (and their children)...\n", $1);
