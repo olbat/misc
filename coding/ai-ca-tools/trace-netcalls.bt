@@ -13,8 +13,10 @@
  * (bpf_probe_read vs bpf_probe_read_user).
  *
  * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
- * Usage: sudo bpftrace trace-ai-coding-agent-netcalls.bt <PID>
+ * Usage: sudo bpftrace trace-netcalls.bt <PID>
  */
+
+config { unstable_macro=enable }
 
 // --- Macros ---
 
@@ -125,7 +127,7 @@ macro log_udp6($sk, $msg, size) {
 BEGIN
 {
     if ($1 == 0) {
-        printf("Usage: sudo bpftrace trace-ai-coding-agent-netcalls.bt <PID>\n");
+        printf("Usage: sudo bpftrace trace-netcalls.bt <PID>\n");
         exit();
     }
     printf("Monitoring network calls of PID %d (and their children)...\n", $1);
