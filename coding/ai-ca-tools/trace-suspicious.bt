@@ -12,6 +12,14 @@
  *   - Persistence mechanisms (crontabs, systemd units, shell rc files)
  *   - System manipulation (ptrace, kernel modules, mounts)
  *   - Covert execution (memfd_create, raw sockets)
+ *   - Listening sockets / reverse shells (bind, listen, accept)
+ *   - Cross-process memory access (process_vm_readv/writev)
+ *   - Namespace / sandbox escape (unshare, chroot, pivot_root)
+ *   - Code injection / anti-forensics (mprotect +X, prctl no-dump,
+ *     seccomp, personality, userfaultfd)
+ *   - Symlink / hardlink attacks
+ *   - Credential keyring access (keyctl)
+ *   - Destructive actions (reboot, kill outside watched tree)
  *   - Permission manipulation (setting setuid/setgid bits)
  *
  * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
@@ -262,6 +270,213 @@ tracepoint:syscalls:sys_enter_socket
     printf("%s.%03d      %-10s family=%d protocol=%d\n",
         strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
         "!RAW_SOCK", args->family, args->protocol);
+}
+
+// ========================================================================
+// Listening sockets / reverse shells
+// ========================================================================
+// An AI coding agent should not be opening listening sockets. This is a
+// common pattern for reverse shells and C2 channels.
+
+// bind — binding to a network address to accept incoming connections.
+tracepoint:syscalls:sys_enter_bind
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s fd=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!BIND", args->fd);
+}
+
+// listen — start accepting connections on a socket.
+tracepoint:syscalls:sys_enter_listen
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s fd=%d backlog=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!LISTEN", args->fd, args->backlog);
+}
+
+// accept / accept4 — accepting an incoming connection.
+tracepoint:syscalls:sys_enter_accept
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s fd=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!ACCEPT", args->fd);
+}
+
+tracepoint:syscalls:sys_enter_accept4
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s fd=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!ACCEPT", args->fd);
+}
+
+// ========================================================================
+// Cross-process memory access
+// ========================================================================
+// Reading or writing another process's memory without ptrace. Same
+// concern as ptrace but uses a different syscall path.
+
+tracepoint:syscalls:sys_enter_process_vm_readv
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s target_pid=%ld\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!VM_READ", args->pid);
+}
+
+tracepoint:syscalls:sys_enter_process_vm_writev
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s target_pid=%ld\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!VM_WRITE", args->pid);
+}
+
+// ========================================================================
+// Namespace / sandbox escape
+// ========================================================================
+// Creating new namespaces can hide network activity, filesystem changes,
+// or processes from monitoring. chroot/pivot_root change the visible
+// filesystem root.
+
+tracepoint:syscalls:sys_enter_unshare
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s flags=0x%lx\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!UNSHARE", args->unshare_flags);
+}
+
+tracepoint:syscalls:sys_enter_chroot
+/@watched[(int64)pid]/
+{
+    log_event("!CHROOT", str(args->filename))
+}
+
+tracepoint:syscalls:sys_enter_pivot_root
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s %s -> %s\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!PIVROOT", str(args->new_root), str(args->put_old));
+}
+
+// ========================================================================
+// Code injection / anti-forensics
+// ========================================================================
+
+// mprotect with PROT_EXEC (0x4) — making memory pages executable.
+// Classic shellcode injection: allocate RW memory, write payload, flip
+// to executable with mprotect.
+tracepoint:syscalls:sys_enter_mprotect
+/@watched[(int64)pid] && (args->prot & 0x4)/
+{
+    printf("%s.%03d      %-10s addr=0x%lx len=%lu prot=0x%lx\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!MPROT_X", args->start, args->len, args->prot);
+}
+
+// prctl PR_SET_DUMPABLE=0 (arg0=4, arg1=0) — makes the process
+// non-dumpable, preventing core dumps and /proc/pid/mem reads.
+// Anti-forensics technique to hide process memory from inspection.
+tracepoint:syscalls:sys_enter_prctl
+/@watched[(int64)pid] && args->option == 4 && args->arg2 == 0/
+{
+    printf("%s.%03d      %-10s PR_SET_DUMPABLE=0\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!NODUMP");
+}
+
+// seccomp — installing seccomp filters could block tracing or
+// monitoring of the agent process itself.
+tracepoint:syscalls:sys_enter_seccomp
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s op=%u flags=%u\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!SECCOMP", args->op, args->flags);
+}
+
+// personality — changing process execution domain. Can be used to
+// disable ASLR (0x0040000 = ADDR_NO_RANDOMIZE), aiding exploitation.
+tracepoint:syscalls:sys_enter_personality
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s persona=0x%lx\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!PERSONA", args->personality);
+}
+
+// userfaultfd — used in kernel race-condition exploits. No legitimate
+// use for a coding agent.
+tracepoint:syscalls:sys_enter_userfaultfd
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s flags=0x%x\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!UFFD", args->flags);
+}
+
+// ========================================================================
+// Symlink / hardlink attacks
+// ========================================================================
+// Creating symlinks or hardlinks to sensitive files can trick privileged
+// processes into reading/writing the wrong files.
+
+tracepoint:syscalls:sys_enter_symlinkat
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s %s -> %s\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!SYMLINK", str(args->oldname), str(args->newname));
+}
+
+tracepoint:syscalls:sys_enter_linkat
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s %s -> %s\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!HARDLINK", str(args->oldname), str(args->newname));
+}
+
+// ========================================================================
+// Credential keyring access
+// ========================================================================
+// keyctl — manipulate the kernel keyring. Could be used to access or
+// tamper with stored credentials (e.g. ecryptfs, LUKS, Kerberos keys).
+
+tracepoint:syscalls:sys_enter_keyctl
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s operation=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!KEYCTL", args->option);
+}
+
+// ========================================================================
+// Destructive system actions
+// ========================================================================
+
+// reboot — no agent should ever reboot the system.
+tracepoint:syscalls:sys_enter_reboot
+/@watched[(int64)pid]/
+{
+    printf("%s.%03d      %-10s magic=0x%x cmd=0x%x\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!REBOOT", args->magic1, args->cmd);
+}
+
+// kill — sending signals to processes outside the watched tree could be
+// used to interfere with monitoring or other system processes.
+tracepoint:syscalls:sys_enter_kill
+/@watched[(int64)pid] && !@watched[(int64)args->pid] && args->pid > 0/
+{
+    printf("%s.%03d      %-10s target_pid=%d signal=%d\n",
+        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
+        "!KILL_EXT", args->pid, args->sig);
 }
 
 // ========================================================================

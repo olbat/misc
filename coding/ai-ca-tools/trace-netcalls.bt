@@ -1,6 +1,6 @@
 #!/usr/bin/env bpftrace
 /*
- * trace-ai-coding-agent-netcalls.bt
+ * trace-netcalls.bt
  *
  * Monitor outbound network calls (TCP connect, DNS lookups, data transfer)
  * made by a specific process and its descendants.

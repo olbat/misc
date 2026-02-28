@@ -1,6 +1,6 @@
 #!/usr/bin/env bpftrace
 /*
- * monitor_subprocesses.bt
+ * trace-execs.bt
  *
  * Monitor sub-processes spawned by a specific process (and its descendants).
  * For each exec() call, print the timestamp, PID, and full command with args.
