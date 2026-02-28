@@ -30,7 +30,7 @@
 #                              launching a new one
 #   -o, --output FILE          Write traces to FILE (default: temp file)
 #   -f, --filter REGEX         Exclude file-tracer lines matching REGEX
-#                              (grep -vE; see claude.conf for an example)
+#                              (grep -vE; see trace-claude.conf for an example)
 #       --no-filter            Disable the exclusion filter
 #   -E, --disable-execs        Disable subprocess/exec tracing
 #   -F, --disable-files        Disable file operation tracing
@@ -81,7 +81,7 @@ Options:
                              launching a new one
   -o, --output FILE          Write traces to FILE (default: temp file)
   -f, --filter REGEX         Exclude file-tracer lines matching REGEX
-                             (grep -vE; see claude.conf for an example)
+                             (grep -vE; see trace-claude.conf for an example)
       --no-filter            Disable the exclusion filter
   -E, --disable-execs        Disable subprocess/exec tracing
   -F, --disable-files        Disable file operation tracing
@@ -99,10 +99,10 @@ Configuration:
     LOG_FILE="/tmp/my-traces.log"
 
   Precedence: defaults < env vars < config file < CLI options.
-  Process-specific configs can be provided (e.g. claude.conf).
+  Process-specific configs can be provided (e.g. trace-claude.conf).
 
 Example:
-  $0 -c claude.conf -- claude --resume
+  $0 -c trace-claude.conf -- claude --resume
   $0 -p 12345
   $0 -c my.conf -o traces.log -- my-program run
   $0 -EN -- my-program run
