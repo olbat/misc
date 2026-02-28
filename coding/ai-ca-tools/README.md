@@ -35,7 +35,7 @@ sudo bpftrace trace-files.bt <PID>
 
 Monitors suspicious or potentially dangerous operations:
 
-- **Credential/secret access** — opening SSH keys, GPG keyrings, `.aws/`, `.env`, token/secret files, `.netrc`
+- **Credential/secret access** — opening SSH keys, GPG keyrings, Cloud credentials, `.env`, token/secret files, etc.
 - **Privilege escalation** — `setuid`/`setgid`/`setresuid`/`setresgid`, `capset`
 - **Persistence mechanisms** — writing to crontabs, systemd unit files, shell startup files (`.bashrc`, `.zshrc`, etc.)
 - **System manipulation** — `ptrace` (process injection), `mount`/`umount`, kernel module loading, hostname changes
