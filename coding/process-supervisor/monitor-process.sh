@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# trace-process.sh
+# monitor-process.sh
 #
 # Attaches bpftrace scripts (execs, files, netcalls, suspicious) with
 # elevated privileges to monitor a process and all its descendants.
@@ -20,8 +20,8 @@
 # Stops tracing when the process exits or on Ctrl-C / SIGTERM.
 #
 # Usage:
-#   ./trace-process.sh [OPTIONS] -- <COMMAND> [ARGS...]
-#   ./trace-process.sh [OPTIONS] -p <PID>
+#   ./monitor-process.sh [OPTIONS] -- <COMMAND> [ARGS...]
+#   ./monitor-process.sh [OPTIONS] -p <PID>
 #
 # Options:
 #   -c, --config FILE          Source env vars from FILE before applying
@@ -30,7 +30,7 @@
 #                              launching a new one
 #   -o, --output FILE          Write traces to FILE (default: temp file)
 #   -f, --filter REGEX         Exclude file-tracer lines matching REGEX
-#                              (grep -vE; see trace-claude.conf for an example)
+#                              (grep -vE; see monitor-claude.conf for an example)
 #       --no-filter            Disable the exclusion filter
 #   -E, --disable-execs        Disable subprocess/exec tracing
 #   -F, --disable-files        Disable file operation tracing
@@ -81,7 +81,7 @@ Options:
                              launching a new one
   -o, --output FILE          Write traces to FILE (default: temp file)
   -f, --filter REGEX         Exclude file-tracer lines matching REGEX
-                             (grep -vE; see trace-claude.conf for an example)
+                             (grep -vE; see monitor-claude.conf for an example)
       --no-filter            Disable the exclusion filter
   -E, --disable-execs        Disable subprocess/exec tracing
   -F, --disable-files        Disable file operation tracing
@@ -99,10 +99,10 @@ Configuration:
     LOG_FILE="/tmp/my-traces.log"
 
   Precedence: defaults < env vars < config file < CLI options.
-  Process-specific configs can be provided (e.g. trace-claude.conf).
+  Process-specific configs can be provided (e.g. monitor-claude.conf).
 
 Example:
-  $0 -c trace-claude.conf -- claude --resume
+  $0 -c confs/monitor-claude.conf -- claude --resume
   $0 -p 12345
   $0 -c my.conf -o traces.log -- my-program run
   $0 -EN -- my-program run
@@ -159,7 +159,7 @@ if [[ -z "$LOG_FILE" ]]; then
     if [[ -n "$ATTACH_PID" ]]; then
         LOG_TO_STDOUT=1
     else
-        LOG_FILE=$(mktemp "/tmp/trace-process.XXXXXX.log")
+        LOG_FILE=$(mktemp "/tmp/monitor-process.XXXXXX.log")
     fi
 fi
 if [[ "$LOG_TO_STDOUT" -eq 0 ]]; then
@@ -169,7 +169,7 @@ fi
 # --- Acquire sudo credentials upfront ---
 # Prompt once for the password before starting the process, so the
 # process's stdout/stdin are not interleaved with a sudo prompt.
-echo "[trace-process] bpftrace requires root — requesting sudo credentials..."
+echo "[monitor-process] bpftrace requires root — requesting sudo credentials..."
 sudo -v
 
 # --- Child PID tracking ---
@@ -185,7 +185,7 @@ cleanup() {
     CLEANING_UP=1
 
     echo ""
-    echo "[trace-process] Cleaning up..."
+    echo "[monitor-process] Cleaning up..."
 
     # Tracked PIDs may be root-owned (bpftrace/sudo) or user-owned
     # (grep, when filtering is active). Try both; one will succeed.
@@ -195,14 +195,14 @@ cleanup() {
 
     # We never kill the target — we only trace, we don't own its lifecycle.
     if [[ -n "$TARGET_PID" ]] && kill -0 "$TARGET_PID" 2>/dev/null; then
-        echo "[trace-process] Process (PID $TARGET_PID) is still running."
+        echo "[monitor-process] Process (PID $TARGET_PID) is still running."
     fi
 
     wait 2>/dev/null || true
     if [[ "$LOG_TO_STDOUT" -eq 0 ]]; then
-        echo "[trace-process] Traces saved to: $LOG_FILE"
+        echo "[monitor-process] Traces saved to: $LOG_FILE"
     fi
-    echo "[trace-process] Done."
+    echo "[monitor-process] Done."
 }
 
 trap cleanup EXIT
@@ -216,22 +216,22 @@ if [[ -n "$ATTACH_PID" ]]; then
     # Attach mode: verify the target PID is alive
     TARGET_PID="$ATTACH_PID"
     if ! kill -0 "$TARGET_PID" 2>/dev/null; then
-        echo "[trace-process] Process $TARGET_PID is not running." >&2
+        echo "[monitor-process] Process $TARGET_PID is not running." >&2
         exit 1
     fi
-    echo "[trace-process] Attaching to PID: $TARGET_PID"
+    echo "[monitor-process] Attaching to PID: $TARGET_PID"
 else
     # Run mode: launch the command (unprivileged)
     TARGET_OWNED=1
-    echo "[trace-process] Starting: $*"
+    echo "[monitor-process] Starting: $*"
     "$@" &
     TARGET_PID=$!
-    echo "[trace-process] PID: $TARGET_PID"
+    echo "[monitor-process] PID: $TARGET_PID"
 
     # Give the process a moment to start (bpftrace needs a live PID)
     sleep 0.2
     if ! kill -0 "$TARGET_PID" 2>/dev/null; then
-        echo "[trace-process] Process exited immediately." >&2
+        echo "[monitor-process] Process exited immediately." >&2
         exit 1
     fi
 fi
@@ -253,13 +253,13 @@ else
 fi
 
 if [[ "$TRACE_EXECS" -eq 1 ]]; then
-    echo "[trace-process] Attaching exec tracer..."
+    echo "[monitor-process] Attaching exec tracer..."
     sudo stdbuf -oL bpftrace "$SCRIPT_DIR/trace-execs.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
     BPFTRACE_PIDS+=($!)
 fi
 
 if [[ "$TRACE_FILES" -eq 1 ]]; then
-    echo "[trace-process] Attaching file tracer..."
+    echo "[monitor-process] Attaching file tracer..."
     if [[ -n "$FILE_FILTER" ]]; then
         sudo stdbuf -oL bpftrace "$SCRIPT_DIR/trace-files.bt" "$TARGET_PID" 2>&1 \
             | stdbuf -oL grep --line-buffered -vE "$FILE_FILTER" >> "$OUT_REDIR" &
@@ -270,26 +270,26 @@ if [[ "$TRACE_FILES" -eq 1 ]]; then
 fi
 
 if [[ "$TRACE_NETCALLS" -eq 1 ]]; then
-    echo "[trace-process] Attaching network tracer..."
+    echo "[monitor-process] Attaching network tracer..."
     sudo stdbuf -oL bpftrace "$SCRIPT_DIR/trace-netcalls.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
     BPFTRACE_PIDS+=($!)
 fi
 
 if [[ "$TRACE_SUSPICIOUS" -eq 1 ]]; then
-    echo "[trace-process] Attaching suspicious ops tracer..."
+    echo "[monitor-process] Attaching suspicious ops tracer..."
     sudo stdbuf -oL bpftrace "$SCRIPT_DIR/trace-suspicious.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
     BPFTRACE_PIDS+=($!)
 fi
 
 if [[ ${#BPFTRACE_PIDS[@]} -eq 0 ]]; then
-    echo "[trace-process] All tracers disabled, nothing to do." >&2
+    echo "[monitor-process] All tracers disabled, nothing to do." >&2
     exit 1
 fi
 
-echo "[trace-process] ${#BPFTRACE_PIDS[@]} tracer(s) attached."
+echo "[monitor-process] ${#BPFTRACE_PIDS[@]} tracer(s) attached."
 if [[ "$LOG_TO_STDOUT" -eq 0 ]]; then
-    echo "[trace-process] Traces: $LOG_FILE"
-    echo "[trace-process] Follow live with: tail -f $LOG_FILE"
+    echo "[monitor-process] Traces: $LOG_FILE"
+    echo "[monitor-process] Follow live with: tail -f $LOG_FILE"
 fi
 echo ""
 
@@ -304,4 +304,4 @@ else
     done
 fi
 echo ""
-echo "[trace-process] Process (PID $TARGET_PID) exited."
+echo "[monitor-process] Process (PID $TARGET_PID) exited."

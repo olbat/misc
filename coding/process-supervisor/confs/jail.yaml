@@ -1,4 +1,4 @@
-# bwrap-jail.yaml — Bubblewrap sandbox profiles for AI coding agents
+# jail.yaml — Bubblewrap sandbox profiles for AI coding agents
 #
 # Each profile defines:
 #   ro_paths          - host paths mounted read-only
@@ -19,6 +19,75 @@
 # Mount /usr/lib (shared libraries) and specific /usr/share subdirs instead.
 
 profiles:
+  shell:
+    # Minimal profile for interactive testing — no agent, no network
+    ro_paths:
+      - /usr/lib
+      - /lib
+      - /lib64
+      - /usr/share/terminfo     # terminal definitions for interactive use
+
+    rw_paths: []
+
+    allowed_commands:
+      - bash
+      - sh
+      - env
+      - ls
+      - cat
+      - head
+      - tail
+      - grep
+      - find
+      - sed
+      - awk
+      - sort
+      - uniq
+      - wc
+      - cut
+      - tr
+      - tee
+      - xargs
+      - echo
+      - printf
+      - cp
+      - mv
+      - mkdir
+      - rm
+      - touch
+      - chmod
+      - stat
+      - file
+      - diff
+      - dirname
+      - basename
+      - readlink
+      - date
+      - id
+      - whoami
+      - uname
+      - true
+      - false
+      - test
+      - pwd
+
+    env:
+      HOME: /tmp
+      TERM: $TERM
+      PATH: /usr/bin:/usr/local/bin
+
+    share_net: false
+    new_session: true
+    die_with_parent: true
+    hostname: sandbox
+
+    tmpfs:
+      - path: /tmp
+        size: 67108864    # 64 MiB
+
+    symlinks:
+      /usr/bin/sh: /usr/bin/bash
+
   claude:
     ro_paths:
       - /usr/lib

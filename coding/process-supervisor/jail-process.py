@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-bwrap-jail-agent.py
+jail-agent.py
 
-Sandboxes AI coding agent processes using bubblewrap (bwrap).
+Sandboxes processes using bubblewrap (bwrap).
 Builds a bwrap command from a named YAML profile that specifies
 filesystem mounts, allowed commands, environment, and isolation options.
 
 Usage:
-  bwrap-jail-agent.py -c CONFIG -p PROFILE [--ro PATH] [--rw PATH] [--dry-run] [--] COMMAND [ARGS...]
+  jail-agent.py -c CONFIG -p PROFILE [--ro PATH] [--rw PATH] [--dry-run] [--] COMMAND [ARGS...]
 
 Example:
-  bwrap-jail-agent.py -c confs/jail.yaml -p claude --dry-run -- /bin/bash
-  bwrap-jail-agent.py -c confs/jail.yaml -p claude --rw ~/project --ro /opt/data -- ls /
+  jail-agent.py -c confs/jail.yaml -p claude -- claude --resume
+  jail-agent.py -c confs/jail.yaml -p aider --dry-run -- aider
+  jail-agent.py -c confs/jail.yaml -p shell --rw ~/project --ro /opt/data -- bash
 """
 
 import argparse
@@ -310,7 +311,7 @@ def format_argv(argv):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Sandbox AI coding agents using bubblewrap (bwrap).",
+        description="Sandbox processes using bubblewrap (bwrap).",
         usage="%(prog)s -c CONFIG -p PROFILE [--ro PATH] [--rw PATH] [--dry-run] [--] COMMAND [ARGS...]",
     )
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config file")
