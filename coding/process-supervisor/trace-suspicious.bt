@@ -26,14 +26,11 @@
  * Usage: sudo bpftrace trace-suspicious.bt <PID>
  */
 
-config { unstable_macro=enable }
+config = { unstable_macro=enable; }
 
-// Log an event with a single string detail
-macro log_event(event, detail) {
-    printf("%s.%03d      %-10s %s\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        event, detail);
-}
+// Timestamp: HH:MM:SS string and milliseconds within the current second
+macro ts_str(t) { strftime("%H:%M:%S", t) }
+macro ts_ms(t)  { (t % 1000000000) / 1000000 }
 
 BEGIN
 {
@@ -72,9 +69,8 @@ tracepoint:syscalls:sys_enter_openat
     @open_write[tid] = (args->flags & 3) > 0 || (args->flags & 0x40) ? 1 : 0;
 }
 
-// --- Credential / secret files ---
-// SSH keys, GPG keyrings, cloud credentials, 
-// .env files, token/secret/credential files, etc.
+// --- Credential / secret files (1/2) ---
+// SSH keys, GPG keyrings, cloud credentials, GitHub CLI tokens.
 // The traced process has no business reading these.
 tracepoint:syscalls:sys_exit_openat
 /@open_path[tid] != ""/
@@ -85,14 +81,27 @@ tracepoint:syscalls:sys_exit_openat
         strcontains($path, ".docker/") ||
         strcontains($path, ".kube/") ||
         strcontains($path, ".aws/") ||
-        strcontains($path, ".azure/") ||
-        strcontains($path, ".env") ||
+        strcontains($path, ".azure/")) {
+        $t = nsecs;
+        printf("%s.%03d      %-10s %s\n",
+            ts_str($t), ts_ms($t), "!SECRET", $path);
+    }
+}
+
+// --- Credential / secret files (2/2) ---
+// .env files, token/secret/credential files, .netrc, /etc/shadow.
+tracepoint:syscalls:sys_exit_openat
+/@open_path[tid] != ""/
+{
+    $path = @open_path[tid];
+    if (strcontains($path, ".env") ||
         strcontains($path, "token") ||
         strcontains($path, "secret") ||
         strcontains($path, ".netrc") ||
-        strcontains($path, "/etc/shadow")
-    ) {
-        log_event("!SECRET", $path)
+        strcontains($path, "/etc/shadow")) {
+        $t = nsecs;
+        printf("%s.%03d      %-10s %s\n",
+            ts_str($t), ts_ms($t), "!SECRET", $path);
     }
 }
 
@@ -108,7 +117,9 @@ tracepoint:syscalls:sys_exit_openat
         strcontains($path, "/etc/systemd/") ||
         strcontains($path, "systemd/user/")
     ) {
-        log_event("!PERSIST", $path)
+        $t = nsecs;
+        printf("%s.%03d      %-10s %s\n",
+            ts_str($t), ts_ms($t), "!PERSIST", $path);
     }
 }
 
@@ -124,7 +135,9 @@ tracepoint:syscalls:sys_exit_openat
         strcontains($path, ".bash_profile") ||
         strcontains($path, ".zshrc")
     ) {
-        log_event("!SHRC_W", $path)
+        $t = nsecs;
+        printf("%s.%03d      %-10s %s\n",
+            ts_str($t), ts_ms($t), "!SHRC_W", $path);
     }
 
     delete(@open_path[tid]);
@@ -142,17 +155,17 @@ tracepoint:syscalls:sys_exit_openat
 tracepoint:syscalls:sys_enter_setuid
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s uid=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!SETUID", args->uid);
+        ts_str($t), ts_ms($t), "!SETUID", args->uid);
 }
 
 tracepoint:syscalls:sys_enter_setgid
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s gid=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!SETGID", args->gid);
+        ts_str($t), ts_ms($t), "!SETGID", args->gid);
 }
 
 // setresuid / setresgid — set real, effective, and saved user/group IDs.
@@ -160,17 +173,19 @@ tracepoint:syscalls:sys_enter_setgid
 tracepoint:syscalls:sys_enter_setresuid
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s ruid=%d euid=%d suid=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!SETRESUID", args->ruid, args->euid, args->suid);
+        ts_str($t), ts_ms($t), "!SETRESUID",
+        args->ruid, args->euid, args->suid);
 }
 
 tracepoint:syscalls:sys_enter_setresgid
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s rgid=%d egid=%d sgid=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!SETRESGID", args->rgid, args->egid, args->sgid);
+        ts_str($t), ts_ms($t), "!SETRESGID",
+        args->rgid, args->egid, args->sgid);
 }
 
 // capset — modify process capabilities (e.g. granting CAP_NET_RAW,
@@ -178,9 +193,9 @@ tracepoint:syscalls:sys_enter_setresgid
 tracepoint:syscalls:sys_enter_capset
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s pid=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!CAPSET", pid);
+        ts_str($t), ts_ms($t), "!CAPSET", pid);
 }
 
 // ========================================================================
@@ -193,9 +208,9 @@ tracepoint:syscalls:sys_enter_capset
 tracepoint:syscalls:sys_enter_ptrace
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s request=%ld target_pid=%ld\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!PTRACE", args->request, args->pid);
+        ts_str($t), ts_ms($t), "!PTRACE", args->request, args->pid);
 }
 
 // mount / umount — mounting filesystems can be used to overlay system
@@ -203,15 +218,18 @@ tracepoint:syscalls:sys_enter_ptrace
 tracepoint:syscalls:sys_enter_mount
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s %s on %s type %s\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!MOUNT", str(args->dev_name), str(args->dir_name), str(args->type));
+        ts_str($t), ts_ms($t), "!MOUNT",
+        str(args->dev_name), str(args->dir_name), str(args->type));
 }
 
 tracepoint:syscalls:sys_enter_umount
 /@watched[(int64)pid]/
 {
-    log_event("!UMOUNT", str(args->name))
+    $t = nsecs;
+    printf("%s.%03d      %-10s %s\n",
+        ts_str($t), ts_ms($t), "!UMOUNT", str(args->name));
 }
 
 // init_module / finit_module — loading kernel modules gives full kernel
@@ -219,17 +237,17 @@ tracepoint:syscalls:sys_enter_umount
 tracepoint:syscalls:sys_enter_init_module
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s size=%lu\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!KMOD", args->len);
+        ts_str($t), ts_ms($t), "!KMOD", args->len);
 }
 
 tracepoint:syscalls:sys_enter_finit_module
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s fd=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!KMOD", args->fd);
+        ts_str($t), ts_ms($t), "!KMOD", args->fd);
 }
 
 // sethostname / setdomainname — changing the system's identity is not
@@ -237,13 +255,17 @@ tracepoint:syscalls:sys_enter_finit_module
 tracepoint:syscalls:sys_enter_sethostname
 /@watched[(int64)pid]/
 {
-    log_event("!SETHOST", str(args->name))
+    $t = nsecs;
+    printf("%s.%03d      %-10s %s\n",
+        ts_str($t), ts_ms($t), "!SETHOST", str(args->name));
 }
 
 tracepoint:syscalls:sys_enter_setdomainname
 /@watched[(int64)pid]/
 {
-    log_event("!SETDOM", str(args->name))
+    $t = nsecs;
+    printf("%s.%03d      %-10s %s\n",
+        ts_str($t), ts_ms($t), "!SETDOM", str(args->name));
 }
 
 // ========================================================================
@@ -256,9 +278,10 @@ tracepoint:syscalls:sys_enter_setdomainname
 tracepoint:syscalls:sys_enter_memfd_create
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s name=%s flags=0x%x\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!MEMFD", str(args->uname), args->flags);
+        ts_str($t), ts_ms($t), "!MEMFD",
+        str(args->uname), args->flags);
 }
 
 // socket with SOCK_RAW (type 3) — raw sockets allow crafting arbitrary
@@ -266,9 +289,10 @@ tracepoint:syscalls:sys_enter_memfd_create
 tracepoint:syscalls:sys_enter_socket
 /@watched[(int64)pid] && args->type == 3/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s family=%d protocol=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!RAW_SOCK", args->family, args->protocol);
+        ts_str($t), ts_ms($t), "!RAW_SOCK",
+        args->family, args->protocol);
 }
 
 // ========================================================================
@@ -281,35 +305,35 @@ tracepoint:syscalls:sys_enter_socket
 tracepoint:syscalls:sys_enter_bind
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s fd=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!BIND", args->fd);
+        ts_str($t), ts_ms($t), "!BIND", args->fd);
 }
 
 // listen — start accepting connections on a socket.
 tracepoint:syscalls:sys_enter_listen
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s fd=%d backlog=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!LISTEN", args->fd, args->backlog);
+        ts_str($t), ts_ms($t), "!LISTEN", args->fd, args->backlog);
 }
 
 // accept / accept4 — accepting an incoming connection.
 tracepoint:syscalls:sys_enter_accept
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s fd=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!ACCEPT", args->fd);
+        ts_str($t), ts_ms($t), "!ACCEPT", args->fd);
 }
 
 tracepoint:syscalls:sys_enter_accept4
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s fd=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!ACCEPT", args->fd);
+        ts_str($t), ts_ms($t), "!ACCEPT", args->fd);
 }
 
 // ========================================================================
@@ -321,17 +345,17 @@ tracepoint:syscalls:sys_enter_accept4
 tracepoint:syscalls:sys_enter_process_vm_readv
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s target_pid=%ld\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!VM_READ", args->pid);
+        ts_str($t), ts_ms($t), "!VM_READ", args->pid);
 }
 
 tracepoint:syscalls:sys_enter_process_vm_writev
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s target_pid=%ld\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!VM_WRITE", args->pid);
+        ts_str($t), ts_ms($t), "!VM_WRITE", args->pid);
 }
 
 // ========================================================================
@@ -344,23 +368,26 @@ tracepoint:syscalls:sys_enter_process_vm_writev
 tracepoint:syscalls:sys_enter_unshare
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s flags=0x%lx\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!UNSHARE", args->unshare_flags);
+        ts_str($t), ts_ms($t), "!UNSHARE", args->unshare_flags);
 }
 
 tracepoint:syscalls:sys_enter_chroot
 /@watched[(int64)pid]/
 {
-    log_event("!CHROOT", str(args->filename))
+    $t = nsecs;
+    printf("%s.%03d      %-10s %s\n",
+        ts_str($t), ts_ms($t), "!CHROOT", str(args->filename));
 }
 
 tracepoint:syscalls:sys_enter_pivot_root
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s %s -> %s\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!PIVROOT", str(args->new_root), str(args->put_old));
+        ts_str($t), ts_ms($t), "!PIVROOT",
+        str(args->new_root), str(args->put_old));
 }
 
 // ========================================================================
@@ -373,9 +400,10 @@ tracepoint:syscalls:sys_enter_pivot_root
 tracepoint:syscalls:sys_enter_mprotect
 /@watched[(int64)pid] && (args->prot & 0x4)/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s addr=0x%lx len=%lu prot=0x%lx\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!MPROT_X", args->start, args->len, args->prot);
+        ts_str($t), ts_ms($t), "!MPROT_X",
+        args->start, args->len, args->prot);
 }
 
 // prctl PR_SET_DUMPABLE=0 (arg0=4, arg1=0) — makes the process
@@ -384,9 +412,9 @@ tracepoint:syscalls:sys_enter_mprotect
 tracepoint:syscalls:sys_enter_prctl
 /@watched[(int64)pid] && args->option == 4 && args->arg2 == 0/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s PR_SET_DUMPABLE=0\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!NODUMP");
+        ts_str($t), ts_ms($t), "!NODUMP");
 }
 
 // seccomp — installing seccomp filters could block tracing or
@@ -394,9 +422,9 @@ tracepoint:syscalls:sys_enter_prctl
 tracepoint:syscalls:sys_enter_seccomp
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s op=%u flags=%u\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!SECCOMP", args->op, args->flags);
+        ts_str($t), ts_ms($t), "!SECCOMP", args->op, args->flags);
 }
 
 // personality — changing process execution domain. Can be used to
@@ -404,9 +432,9 @@ tracepoint:syscalls:sys_enter_seccomp
 tracepoint:syscalls:sys_enter_personality
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s persona=0x%lx\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!PERSONA", args->personality);
+        ts_str($t), ts_ms($t), "!PERSONA", args->personality);
 }
 
 // userfaultfd — used in kernel race-condition exploits. No legitimate
@@ -414,9 +442,9 @@ tracepoint:syscalls:sys_enter_personality
 tracepoint:syscalls:sys_enter_userfaultfd
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s flags=0x%x\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!UFFD", args->flags);
+        ts_str($t), ts_ms($t), "!UFFD", args->flags);
 }
 
 // ========================================================================
@@ -428,17 +456,19 @@ tracepoint:syscalls:sys_enter_userfaultfd
 tracepoint:syscalls:sys_enter_symlinkat
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s %s -> %s\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!SYMLINK", str(args->oldname), str(args->newname));
+        ts_str($t), ts_ms($t), "!SYMLINK",
+        str(args->oldname), str(args->newname));
 }
 
 tracepoint:syscalls:sys_enter_linkat
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s %s -> %s\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!HARDLINK", str(args->oldname), str(args->newname));
+        ts_str($t), ts_ms($t), "!HARDLINK",
+        str(args->oldname), str(args->newname));
 }
 
 // ========================================================================
@@ -450,9 +480,9 @@ tracepoint:syscalls:sys_enter_linkat
 tracepoint:syscalls:sys_enter_keyctl
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s operation=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!KEYCTL", args->option);
+        ts_str($t), ts_ms($t), "!KEYCTL", args->option);
 }
 
 // ========================================================================
@@ -463,9 +493,9 @@ tracepoint:syscalls:sys_enter_keyctl
 tracepoint:syscalls:sys_enter_reboot
 /@watched[(int64)pid]/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s magic=0x%x cmd=0x%x\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!REBOOT", args->magic1, args->cmd);
+        ts_str($t), ts_ms($t), "!REBOOT", args->magic1, args->cmd);
 }
 
 // kill — sending signals to processes outside the watched tree could be
@@ -473,9 +503,9 @@ tracepoint:syscalls:sys_enter_reboot
 tracepoint:syscalls:sys_enter_kill
 /@watched[(int64)pid] && !@watched[(int64)args->pid] && args->pid > 0/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s target_pid=%d signal=%d\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!KILL_EXT", args->pid, args->sig);
+        ts_str($t), ts_ms($t), "!KILL_EXT", args->pid, args->sig);
 }
 
 // ========================================================================
@@ -488,9 +518,10 @@ tracepoint:syscalls:sys_enter_kill
 tracepoint:syscalls:sys_enter_fchmodat
 /@watched[(int64)pid] && (args->mode & 06000)/
 {
+    $t = nsecs;
     printf("%s.%03d      %-10s %s (mode %o — setuid/setgid!)\n",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "!SUID_CHM", str(args->filename), args->mode);
+        ts_str($t), ts_ms($t), "!SUID_CHM",
+        str(args->filename), args->mode);
 }
 
 // --- Process tracking ---

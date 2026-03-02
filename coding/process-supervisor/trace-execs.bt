@@ -8,6 +8,12 @@
  * Usage: sudo bpftrace monitor_subprocesses.bt <PID>
  */
 
+config = { unstable_macro=enable; }
+
+// Timestamp: HH:MM:SS string and milliseconds within the current second
+macro ts_str(t) { strftime("%H:%M:%S", t) }
+macro ts_ms(t)  { (t % 1000000000) / 1000000 }
+
 BEGIN
 {
     if ($1 == 0) {
@@ -36,9 +42,8 @@ tracepoint:sched:sched_process_fork
 tracepoint:syscalls:sys_enter_execve
 /(@watched[(int64)pid])/
 {
-    printf("%s.%03d      %-10s ",
-        strftime("%H:%M:%S", nsecs), (nsecs % 1000000000) / 1000000,
-        "EXEC");
+    $t = nsecs;
+    printf("%s.%03d      %-10s ", ts_str($t), ts_ms($t), "EXEC");
     join(args->argv);
 }
 

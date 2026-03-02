@@ -9,6 +9,12 @@
  * Usage: sudo bpftrace trace-files.bt <PID>
  */
 
+config = { unstable_macro=enable; }
+
+// Timestamp: HH:MM:SS string and milliseconds within the current second
+macro ts_str(t) { strftime("%H:%M:%S", t) }
+macro ts_ms(t)  { (t % 1000000000) / 1000000 }
+
 BEGIN
 {
     if ($1 == 0) {
@@ -42,22 +48,19 @@ tracepoint:syscalls:sys_enter_openat
 tracepoint:syscalls:sys_exit_openat
 /@open_path[tid] != ""/
 {
-    $ms = (nsecs % 1000000000) / 1000000;
+    $t = nsecs;
     $flags = @open_flags[tid];
     $path = @open_path[tid];
 
     if ($flags & 0x40) {
         // O_CREAT
-        printf("%s.%03d      %-10s %s\n",
-            strftime("%H:%M:%S", nsecs), $ms, "CREATE", $path);
+        printf("%s.%03d      %-10s %s\n", ts_str($t), ts_ms($t), "CREATE", $path);
     } else if (($flags & 3) > 0) {
         // O_WRONLY (1) or O_RDWR (2)
-        printf("%s.%03d      %-10s %s\n",
-            strftime("%H:%M:%S", nsecs), $ms, "OPEN_W", $path);
+        printf("%s.%03d      %-10s %s\n", ts_str($t), ts_ms($t), "OPEN_W", $path);
     } else {
         // O_RDONLY (0)
-        printf("%s.%03d      %-10s %s\n",
-            strftime("%H:%M:%S", nsecs), $ms, "OPEN_R", $path);
+        printf("%s.%03d      %-10s %s\n", ts_str($t), ts_ms($t), "OPEN_R", $path);
     }
 
     // Map fd to path for subsequent read/write tracking
@@ -74,18 +77,18 @@ tracepoint:syscalls:sys_exit_openat
 tracepoint:syscalls:sys_enter_read
 /@watched[(int64)pid] && @fd_to_path[pid, (int64)args->fd] != ""/
 {
-    $ms = (nsecs % 1000000000) / 1000000;
+    $t = nsecs;
     printf("%s.%03d      %-10s %s (%d bytes)\n",
-        strftime("%H:%M:%S", nsecs), $ms, "READ",
+        ts_str($t), ts_ms($t), "READ",
         @fd_to_path[pid, (int64)args->fd], args->count);
 }
 
 tracepoint:syscalls:sys_enter_write
 /@watched[(int64)pid] && @fd_to_path[pid, (int64)args->fd] != ""/
 {
-    $ms = (nsecs % 1000000000) / 1000000;
+    $t = nsecs;
     printf("%s.%03d      %-10s %s (%d bytes)\n",
-        strftime("%H:%M:%S", nsecs), $ms, "WRITE",
+        ts_str($t), ts_ms($t), "WRITE",
         @fd_to_path[pid, (int64)args->fd], args->count);
 }
 
@@ -102,9 +105,9 @@ tracepoint:syscalls:sys_enter_close
 tracepoint:syscalls:sys_enter_mkdirat
 /@watched[(int64)pid]/
 {
-    $ms = (nsecs % 1000000000) / 1000000;
+    $t = nsecs;
     printf("%s.%03d      %-10s %s (mode %o)\n",
-        strftime("%H:%M:%S", nsecs), $ms, "MKDIR",
+        ts_str($t), ts_ms($t), "MKDIR",
         str(args->pathname), args->mode);
 }
 
@@ -113,10 +116,9 @@ tracepoint:syscalls:sys_enter_mkdirat
 tracepoint:syscalls:sys_enter_unlinkat
 /@watched[(int64)pid]/
 {
-    $ms = (nsecs % 1000000000) / 1000000;
+    $t = nsecs;
     printf("%s.%03d      %-10s %s\n",
-        strftime("%H:%M:%S", nsecs), $ms, "DELETE",
-        str(args->pathname));
+        ts_str($t), ts_ms($t), "DELETE", str(args->pathname));
 }
 
 // --- File rename ---
@@ -124,9 +126,9 @@ tracepoint:syscalls:sys_enter_unlinkat
 tracepoint:syscalls:sys_enter_renameat2
 /@watched[(int64)pid]/
 {
-    $ms = (nsecs % 1000000000) / 1000000;
+    $t = nsecs;
     printf("%s.%03d      %-10s %s -> %s\n",
-        strftime("%H:%M:%S", nsecs), $ms, "RENAME",
+        ts_str($t), ts_ms($t), "RENAME",
         str(args->oldname), str(args->newname));
 }
 
@@ -135,9 +137,9 @@ tracepoint:syscalls:sys_enter_renameat2
 tracepoint:syscalls:sys_enter_fchmodat
 /@watched[(int64)pid]/
 {
-    $ms = (nsecs % 1000000000) / 1000000;
+    $t = nsecs;
     printf("%s.%03d      %-10s %s (mode %o)\n",
-        strftime("%H:%M:%S", nsecs), $ms, "CHMOD",
+        ts_str($t), ts_ms($t), "CHMOD",
         str(args->filename), args->mode);
 }
 
@@ -146,9 +148,9 @@ tracepoint:syscalls:sys_enter_fchmodat
 tracepoint:syscalls:sys_enter_fchownat
 /@watched[(int64)pid]/
 {
-    $ms = (nsecs % 1000000000) / 1000000;
+    $t = nsecs;
     printf("%s.%03d      %-10s %s (uid %d, gid %d)\n",
-        strftime("%H:%M:%S", nsecs), $ms, "CHOWN",
+        ts_str($t), ts_ms($t), "CHOWN",
         str(args->filename), args->user, args->group);
 }
 
