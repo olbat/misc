@@ -1,6 +1,6 @@
 # Process supervision & monitoring tools
 
-Tools to monitor and sandbox processes on Linux. While primarily developed for AI coding agents, all tools work with any process.
+Tools to monitor and sandbox processes on Linux. While primarily developed to supervise AI coding agents, all tools work with any process.
 
 - **Monitoring** — [bpftrace](https://github.com/bpftrace/bpftrace) scripts that trace what a process and all its descendants are doing (exec, file, network, suspicious ops) using kernel tracepoints, kprobes, and uprobes. Requires Linux with BTF support (`CONFIG_DEBUG_INFO_BTF=y`), bpftrace >= 0.21.
 - **Sandboxing** — a [bubblewrap](https://github.com/containers/bubblewrap) wrapper that jails processes with configurable filesystem, command, and network restrictions. Requires bwrap, Python 3.6+, PyYAML.
