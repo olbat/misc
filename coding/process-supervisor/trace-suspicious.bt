@@ -83,8 +83,9 @@ tracepoint:syscalls:sys_exit_openat
         strcontains($path, ".aws/") ||
         strcontains($path, ".azure/")) {
         $t = nsecs;
-        printf("%s.%03d      %-10s %s\n",
-            ts_str($t), ts_ms($t), "!SECRET", $path);
+        $mode = @open_write[tid] ? "W" : "R";
+        printf("%s.%03d      !SECRET[%s] %s\n",
+            ts_str($t), ts_ms($t), $mode, $path);
     }
 }
 
@@ -100,8 +101,9 @@ tracepoint:syscalls:sys_exit_openat
         strcontains($path, ".netrc") ||
         strcontains($path, "/etc/shadow")) {
         $t = nsecs;
-        printf("%s.%03d      %-10s %s\n",
-            ts_str($t), ts_ms($t), "!SECRET", $path);
+        $mode = @open_write[tid] ? "W" : "R";
+        printf("%s.%03d      !SECRET[%s] %s\n",
+            ts_str($t), ts_ms($t), $mode, $path);
     }
 }
 
@@ -302,12 +304,33 @@ tracepoint:syscalls:sys_enter_socket
 // common pattern for reverse shells and C2 channels.
 
 // bind — binding to a network address to accept incoming connections.
+// Parse the sockaddr to show what address/port is being bound.
+// Skip AF_NETLINK (16) — normal kernel-userspace IPC, not a network concern.
 tracepoint:syscalls:sys_enter_bind
-/@watched[(int64)pid]/
+/@watched[(int64)pid] && *(uint16 *)args->umyaddr != 16/
 {
     $t = nsecs;
-    printf("%s.%03d      %-10s fd=%d\n",
-        ts_str($t), ts_ms($t), "!BIND", args->fd);
+    $sa = (uint8 *)args->umyaddr;
+    $family = *(uint16 *)$sa;
+    // Port is at offset 2 in both sockaddr_in and sockaddr_in6 (big-endian)
+    $port_be = *(uint16 *)($sa + 2);
+    $port = ($port_be >> 8) | (($port_be & 0xff) << 8);
+
+    if ($family == 2) {  // AF_INET
+        $addr = ntop(*(uint32 *)($sa + 4));
+        printf("%s.%03d      %-10s fd=%d AF_INET %s:%d\n",
+            ts_str($t), ts_ms($t), "!BIND", args->fd, $addr, $port);
+    } else if ($family == 10) {  // AF_INET6
+        printf("%s.%03d      %-10s fd=%d AF_INET6 port=%d\n",
+            ts_str($t), ts_ms($t), "!BIND", args->fd, $port);
+    } else if ($family == 1) {  // AF_UNIX
+        $path = str($sa + 2);
+        printf("%s.%03d      %-10s fd=%d AF_UNIX %s\n",
+            ts_str($t), ts_ms($t), "!BIND", args->fd, $path);
+    } else {
+        printf("%s.%03d      %-10s fd=%d family=%d\n",
+            ts_str($t), ts_ms($t), "!BIND", args->fd, $family);
+    }
 }
 
 // listen — start accepting connections on a socket.
