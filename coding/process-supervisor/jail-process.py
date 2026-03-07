@@ -2,33 +2,37 @@
 """
 jail-process.py
 
-Sandboxes processes using one of two backends (mutually exclusive):
+Sandboxes processes using one of three backends (mutually exclusive):
 
-  bwrap     — bubblewrap namespace isolation: separate mount, PID, network,
-              user, IPC, and UTS namespaces; filesystem and command allowlists;
-              environment clearing. Requires bwrap to be installed.
+  bwrap        — bubblewrap namespace isolation: separate mount, PID, network,
+                 user, IPC, and UTS namespaces; filesystem and command allowlists;
+                 environment clearing. Requires bwrap to be installed. Linux only.
 
-  landlock  — Linux Landlock LSM: kernel-enforced filesystem allowlist and
-              exec filtering, plus environment isolation. No extra privileges
-              or binaries required. Requires Linux 5.13+.
+  sandbox-exec — macOS Seatbelt sandbox: SBPL-based filesystem access control,
+                 network isolation, exec allowlisting, and environment clearing.
+                 Requires macOS with sandbox-exec (available by default). macOS only.
 
-The default backend is whichever is available, preferring bwrap (stronger
-isolation). The two backends cannot be combined: Landlock requires
-prctl(PR_SET_NO_NEW_PRIVS), which prevents the user-namespace creation
-that bwrap relies on.
+  landlock     — Linux Landlock LSM: kernel-enforced filesystem allowlist and
+                 exec filtering, plus environment isolation. No extra privileges
+                 or binaries required. Requires Linux 5.13+.
+
+The default backend is whichever is available, preferring bwrap (strongest
+isolation) on Linux and sandbox-exec on macOS.
 
 Usage:
   jail-process.py -c CONFIG -p PROFILE [--ro PATH] [--rw PATH]
-                [--bwrap | --landlock] [--dry-run] [--] COMMAND [ARGS...]
+                [--bwrap | --sandbox-exec | --landlock] [--dry-run] [--] COMMAND [ARGS...]
 
 Example:
   jail-process.py -c confs/jail.yaml -p claude -- claude --resume
   jail-process.py -c confs/jail.yaml -p aider --dry-run -- aider
   jail-process.py -c confs/jail.yaml -p shell --rw ~/project --ro /opt/data -- bash
+  jail-process.py -c confs/jail.yaml -p shell --sandbox-exec -- bash
   jail-process.py -c confs/jail.yaml -p shell --landlock -- bash
   jail-process.py -c confs/jail.yaml -p shell --bwrap -- bash
 """
 
+import abc
 import argparse
 import ctypes
 import ctypes.util
@@ -153,6 +157,26 @@ def scan_script_deps(path, _seen=None):
                 deps.extend(scan_script_deps(real_target, _seen))
 
     return deps
+
+
+def _resolve_binary_paths(name):
+    """Resolve a binary name or absolute path to all its canonical filesystem paths.
+
+    Returns a set containing the which/given path, its realpath, and paths for
+    any shebang interpreters or exec targets found in the script (recursively).
+    Returns an empty set if the binary cannot be found.
+    """
+    p = name if os.path.isabs(name) else shutil.which(name)
+    if not p:
+        return set()
+    real = os.path.realpath(p)
+    paths = {p, real}
+    for orig, dep in scan_script_deps(real):
+        if os.path.exists(dep):
+            paths.add(dep)
+            if orig != dep:
+                paths.add(orig)
+    return paths
 
 
 # ---------------------------------------------------------------------------
@@ -292,350 +316,537 @@ class BwrapBuilder:
         return self.argv
 
 
-def build_bwrap_argv(profile, command):
-    """Build the full bwrap argument vector from a profile and command."""
-    b = BwrapBuilder()
-    b.add_isolation(profile)
-    b.add_mounts(profile)
-    b.add_allowed_commands(profile)
-    command = b.bind_command(command)
-    b.add_symlinks(profile)
-    b.add_env(profile)
-    return b.finalize(command)
-
 
 # ---------------------------------------------------------------------------
-# Landlock LSM support
+# Shared helpers
 # ---------------------------------------------------------------------------
 
-# Syscall numbers for landlock_create_ruleset / landlock_add_rule / landlock_restrict_self.
-# All supported architectures share the same numbers (generic kernel syscall table).
-_LANDLOCK_ARCHES   = frozenset({"x86_64", "aarch64", "riscv64"})
-_LANDLOCK_SYSCALLS = (444, 445, 446)
+def _build_env(profile):
+    """Build a clean environment dict from the profile's env section.
 
-# Filesystem access rights
-_FS_EXECUTE    = 1 << 0
-_FS_WRITE_FILE = 1 << 1
-_FS_READ_FILE  = 1 << 2
-_FS_READ_DIR   = 1 << 3
-_FS_REMOVE_DIR  = 1 << 4
-_FS_REMOVE_FILE = 1 << 5
-_FS_MAKE_CHAR  = 1 << 6
-_FS_MAKE_DIR   = 1 << 7
-_FS_MAKE_REG   = 1 << 8
-_FS_MAKE_SOCK  = 1 << 9
-_FS_MAKE_FIFO  = 1 << 10
-_FS_MAKE_BLOCK = 1 << 11
-_FS_MAKE_SYM   = 1 << 12
-_FS_REFER      = 1 << 13  # ABI v2 (Linux 5.19)
-_FS_TRUNCATE   = 1 << 14  # ABI v3 (Linux 6.2)
-_FS_IOCTL_DEV  = 1 << 15  # ABI v5 (Linux 6.10)
-
-# Rights valid only for regular files (not directories)
-_FS_FILE_ONLY = _FS_EXECUTE | _FS_WRITE_FILE | _FS_READ_FILE | _FS_TRUNCATE | _FS_IOCTL_DEV
-
-_FS_READ_ONLY = _FS_EXECUTE | _FS_READ_FILE | _FS_READ_DIR
-
-_RULE_PATH_BENEATH      = 1
-_CREATE_RULESET_VERSION = 1 << 0
-_PR_SET_NO_NEW_PRIVS    = 38
-_PR_SET_PDEATHSIG       = 1
-_SIGTERM                = 15
-
-
-class _RulesetAttr(ctypes.Structure):
-    _fields_ = [("handled_access_fs", ctypes.c_uint64)]
-
-
-class _PathBeneathAttr(ctypes.Structure):
-    _pack_ = 1
-    _fields_ = [
-        ("allowed_access", ctypes.c_uint64),
-        ("parent_fd", ctypes.c_int32),
-    ]
-
-
-def _fs_all_rights(version):
-    """Return full FS access rights mask for the given Landlock ABI version."""
-    rights = (1 << 13) - 1  # v1 (5.13): bits 0–12
-    if version >= 2:
-        rights |= _FS_REFER      # v2 (5.19)
-    if version >= 3:
-        rights |= _FS_TRUNCATE   # v3 (6.2)
-    # v4 (6.7) added network rights only; no new FS rights
-    if version >= 5:
-        rights |= _FS_IOCTL_DEV  # v5 (6.10)
-    return rights
-
-
-@functools.lru_cache(maxsize=None)
-def _get_libc():
-    """Load libc via ctypes, configuring syscall/prctl prototypes."""
-    try:
-        lib = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6",
-                          use_errno=True)
-        lib.syscall.restype = ctypes.c_long
-        lib.prctl.restype = ctypes.c_int
-        return lib
-    except Exception:
-        return None
-
-
-@functools.lru_cache(maxsize=None)
-def landlock_version():
-    """Return the supported Landlock ABI version, or 0 if not available."""
-    if platform.machine() not in _LANDLOCK_ARCHES:
-        return 0
-    libc = _get_libc()
-    if libc is None:
-        return 0
-    # Kernel requires attr=NULL and size=0 when LANDLOCK_CREATE_RULESET_VERSION is set
-    ret = libc.syscall(
-        ctypes.c_long(_LANDLOCK_SYSCALLS[0]),
-        ctypes.c_void_p(None),
-        ctypes.c_size_t(0),
-        ctypes.c_uint32(_CREATE_RULESET_VERSION),
-    )
-    return int(ret) if ret >= 0 else 0
-
-
-def _ll_add_path(libc, add_nr, ruleset_fd, path, access):
-    """Add a landlock_add_rule for path; silently skips non-existent paths.
-
-    The kernel rejects directory-only rights (READ_DIR, MAKE_*, ...) for
-    regular files, so we mask access to file-only rights for non-directories.
+    Returns a dict with only the profile-specified variables, resolving any
+    $VAR references from the current environment.  If the profile has no 'env'
+    key, returns a copy of the current environment (no isolation).
     """
-    try:
-        fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
-    except OSError:
-        return
-    try:
-        if not os.path.isdir(path):
-            access &= _FS_FILE_ONLY
-        if not access:
-            return
-        rule = _PathBeneathAttr(allowed_access=access, parent_fd=fd)
-        ret = int(libc.syscall(
-            ctypes.c_long(add_nr),
-            ctypes.c_int(ruleset_fd),
-            ctypes.c_int(_RULE_PATH_BENEATH),
-            ctypes.byref(rule),
-            ctypes.c_uint32(0),
-        ))
-        if ret != 0:
-            err = ctypes.get_errno()
-            warn(f"landlock: add_rule failed for {path}: {os.strerror(err)}")
-    finally:
-        os.close(fd)
-
-
-def apply_landlock(ro_paths, rw_paths):
-    """Apply Landlock filesystem restrictions before exec.
-
-    Grants read-only (execute/read) access to ro_paths and full access to
-    rw_paths. Paths that do not exist are silently skipped.
-
-    Note: this calls prctl(PR_SET_NO_NEW_PRIVS), which prevents the process
-    from gaining privileges via setuid/capabilities and also prevents creating
-    new user namespaces. This makes Landlock incompatible with bubblewrap
-    (which creates user namespaces for isolation); the two backends are mutually exclusive.
-
-    Returns True if Landlock was applied, False if the kernel does not support
-    it or the architecture is unsupported. Raises OSError on syscall failure.
-    """
-    version = landlock_version()
-    if version == 0:
-        return False
-    libc = _get_libc()  # guaranteed non-None when version > 0
-
-    create_nr, add_nr, restrict_nr = _LANDLOCK_SYSCALLS
-    all_rights = _fs_all_rights(version)
-    ro_rights = _FS_READ_ONLY & all_rights
-
-    attr = _RulesetAttr(all_rights)
-    ruleset_fd = int(libc.syscall(
-        ctypes.c_long(create_nr),
-        ctypes.byref(attr),
-        ctypes.c_size_t(ctypes.sizeof(attr)),
-        ctypes.c_uint32(0),
-    ))
-    if ruleset_fd < 0:
-        err = ctypes.get_errno()
-        raise OSError(err, f"landlock_create_ruleset: {os.strerror(err)}")
-
-    try:
-        for path in sorted(ro_paths):
-            _ll_add_path(libc, add_nr, ruleset_fd, path, ro_rights)
-        for path in sorted(rw_paths):
-            _ll_add_path(libc, add_nr, ruleset_fd, path, all_rights)
-
-        ret = libc.prctl(
-            ctypes.c_int(_PR_SET_NO_NEW_PRIVS),
-            ctypes.c_ulong(1),
-            ctypes.c_ulong(0), ctypes.c_ulong(0), ctypes.c_ulong(0),
-        )
-        if ret != 0:
-            err = ctypes.get_errno()
-            raise OSError(err, f"prctl(PR_SET_NO_NEW_PRIVS): {os.strerror(err)}")
-
-        ret = int(libc.syscall(
-            ctypes.c_long(restrict_nr),
-            ctypes.c_int(ruleset_fd),
-            ctypes.c_uint32(0),
-        ))
-        if ret != 0:
-            err = ctypes.get_errno()
-            raise OSError(err, f"landlock_restrict_self: {os.strerror(err)}")
-    finally:
-        os.close(ruleset_fd)
-
-    return True
+    if "env" not in profile:
+        return dict(os.environ)
+    return {
+        var: (os.environ.get(str(val)[1:], "") if str(val).startswith("$") else str(val))
+        for var, val in profile["env"].items()
+    }
 
 
 # ---------------------------------------------------------------------------
-# Profile compatibility checks
+# Sandbox backends
 # ---------------------------------------------------------------------------
 
-def _check_profile_compat(profile, use_bwrap):
-    """Warn about profile options that won't be enforced by the selected backend."""
-    if use_bwrap:
-        # bwrap enforces all options; warn about paths that undermine isolation
+class SandboxBackend(abc.ABC):
+    """Abstract base class for sandbox backends."""
+
+    name: str       # Human-readable name shown in warnings (e.g. "bwrap")
+    flag_attr: str  # argparse attribute name for explicit selection (e.g. "bwrap")
+
+    @classmethod
+    @abc.abstractmethod
+    def available(cls) -> bool:
+        """Return True if this backend is usable on the current system."""
+
+    @abc.abstractmethod
+    def check_compat(self, profile) -> None:
+        """Warn about profile options that this backend does not enforce."""
+
+    @abc.abstractmethod
+    def exec(self, profile, command) -> None:
+        """Apply sandbox restrictions and exec command (never returns)."""
+
+    def dry_run(self, profile, command) -> None:
+        """Print what would be executed; default warns that it has no effect."""
+        warn(f"--dry-run has no effect in {self.name} mode")
+
+    # -- Shared helpers available to all backends --
+
+    def _warn_compat(self, warnings: list[str]) -> None:
+        """Emit a '<name> mode: <msg>' warning for each entry in warnings."""
+        for msg in warnings:
+            warn(f"{self.name} mode: {msg}")
+
+    @staticmethod
+    def _resolve_exe(command: list[str]) -> list[str]:
+        """Resolve command[0] to an absolute path; dies if not found on PATH."""
+        exe = command[0]
+        if not os.path.isabs(exe):
+            exe = shutil.which(exe) or die(f"command '{exe}' not found on host")
+        return [exe, *command[1:]]
+
+    @staticmethod
+    def _maybe_setsid(profile) -> None:
+        """Call os.setsid() when the profile requests a new session (default: True)."""
+        if profile.get("new_session", True):
+            try:
+                os.setsid()
+            except OSError:
+                pass
+
+    @staticmethod
+    def _shell_quote(s: str) -> str:
+        """Single-quote a token for display as part of a shell command."""
+        return f"'{s}'" if " " in s or not s else s
+
+
+class BwrapBackend(SandboxBackend):
+    """bubblewrap namespace sandbox (Linux only)."""
+
+    name      = "bwrap"
+    flag_attr = "bwrap"
+
+    # Number of arguments consumed by each bwrap option (beyond the flag itself)
+    _OPT_ARITY = {
+        "--ro-bind": 2, "--ro-bind-try": 2, "--bind": 2, "--bind-try": 2,
+        "--setenv": 2, "--symlink": 2,
+        "--hostname": 1, "--tmpfs": 1, "--dev": 1, "--proc": 1, "--size": 1,
+    }
+
+    @classmethod
+    def available(cls) -> bool:
+        return bool(shutil.which("bwrap"))
+
+    def check_compat(self, profile) -> None:
         broad = {"/usr", "/usr/bin", "/bin", "/sbin", "/usr/sbin"}
         for path in profile.get("ro_paths", []) + profile.get("rw_paths", []):
             if os.path.abspath(path) in broad:
                 warn(f"bwrap: {path} in paths exposes all host binaries "
                      f"and defeats allowed_commands allowlisting")
-    else:
-        # Landlock cannot enforce namespace-based features
-        not_enforced = []
-        if not profile.get("share_net", False):
-            not_enforced.append("share_net: false (network is NOT isolated)")
-        if profile.get("hostname"):
-            not_enforced.append("hostname (no UTS namespace)")
-        if profile.get("tmpfs"):
-            not_enforced.append("tmpfs (no mount namespace)")
-        if profile.get("symlinks"):
-            not_enforced.append("symlinks (no mount namespace)")
-        if profile.get("allowed_commands"):
-            not_enforced.append(
-                "allowed_commands (exec filtering is less strict than bwrap: "
-                "binaries under ro_paths/rw_paths directories are also executable)"
-            )
-        for msg in not_enforced:
-            warn(f"Landlock mode: {msg}")
+
+    def _build_argv(self, profile, command):
+        """Build the full bwrap argv for the given profile and command."""
+        builder = BwrapBuilder()
+        builder.add_isolation(profile)
+        builder.add_mounts(profile)
+        builder.add_allowed_commands(profile)
+        builder.add_symlinks(profile)
+        builder.add_env(profile)
+        return builder.finalize(builder.bind_command(command))
+
+    @classmethod
+    def _format_argv(cls, argv):
+        """Format a bwrap argv as a readable, copy-pasteable shell command."""
+        parts, i = [], 0
+        while i < len(argv):
+            arity = cls._OPT_ARITY.get(argv[i], 0)
+            parts.append(" ".join(cls._shell_quote(argv[i + j]) for j in range(arity + 1)))
+            i += arity + 1
+        return " \\\n  ".join(parts)
+
+    def exec(self, profile, command) -> None:
+        os.execvp("bwrap", self._build_argv(profile, command))
+
+    def dry_run(self, profile, command) -> None:
+        print(self._format_argv(self._build_argv(profile, command)))
 
 
-# ---------------------------------------------------------------------------
-# Landlock mode
-# ---------------------------------------------------------------------------
+class LandlockBackend(SandboxBackend):
+    """Linux Landlock LSM sandbox (kernel 5.13+, no extra binaries required)."""
 
-def _apply_env(profile):
-    """Clear the environment and rebuild it from the profile's env section."""
-    os.environ.clear()
-    for var, val in profile.get("env", {}).items():
-        val = str(val)
-        os.environ[var] = os.environ.get(val[1:], "") if val.startswith("$") else val
+    name      = "Landlock"
+    flag_attr = "landlock"
 
+    # Architectures sharing the generic Landlock syscall numbers
+    _ARCHES   = frozenset({"x86_64", "aarch64", "riscv64"})
+    # landlock_create_ruleset, landlock_add_rule, landlock_restrict_self
+    _SYSCALLS = (444, 445, 446)
 
-def collect_landlock_paths(profile, command):
-    """Collect host filesystem paths needed for Landlock mode.
+    # Filesystem access rights
+    _FS_EXECUTE    = 1 << 0
+    _FS_WRITE_FILE = 1 << 1
+    _FS_READ_FILE  = 1 << 2
+    _FS_READ_DIR   = 1 << 3
+    _FS_REMOVE_DIR  = 1 << 4
+    _FS_REMOVE_FILE = 1 << 5
+    _FS_MAKE_CHAR  = 1 << 6
+    _FS_MAKE_DIR   = 1 << 7
+    _FS_MAKE_REG   = 1 << 8
+    _FS_MAKE_SOCK  = 1 << 9
+    _FS_MAKE_FIFO  = 1 << 10
+    _FS_MAKE_BLOCK = 1 << 11
+    _FS_MAKE_SYM   = 1 << 12
+    _FS_REFER      = 1 << 13  # ABI v2 (Linux 5.19)
+    _FS_TRUNCATE   = 1 << 14  # ABI v3 (Linux 6.2)
+    _FS_IOCTL_DEV  = 1 << 15  # ABI v5 (Linux 6.10)
+    # Rights valid only for regular files (not directories)
+    _FS_FILE_ONLY = _FS_EXECUTE | _FS_WRITE_FILE | _FS_READ_FILE | _FS_TRUNCATE | _FS_IOCTL_DEV
+    _FS_READ_ONLY = _FS_EXECUTE | _FS_READ_FILE  | _FS_READ_DIR
 
-    Returns (ro_paths, rw_paths) as sets of absolute paths.
-    Includes ro_paths/rw_paths from the profile, plus the resolved binary
-    paths for all allowed_commands and the command itself.
-    """
-    ro = {os.path.abspath(p) for p in profile.get("ro_paths", [])}
-    rw = {os.path.abspath(p) for p in profile.get("rw_paths", [])}
+    _RULE_PATH_BENEATH      = 1
+    _CREATE_RULESET_VERSION = 1 << 0
+    _PR_SET_NO_NEW_PRIVS    = 38
+    _PR_SET_PDEATHSIG       = 1
+    _SIGTERM                = 15
 
-    names = [*profile.get("allowed_commands", []), command[0]]
+    class _RulesetAttr(ctypes.Structure):
+        _fields_ = [("handled_access_fs", ctypes.c_uint64)]
 
-    for name in names:
-        p = name if os.path.isabs(name) else shutil.which(name)
-        if not p:
-            continue
-        real = os.path.realpath(p)
-        ro.update([p, real])
-        for orig, dep in scan_script_deps(real):
-            if os.path.exists(dep):
-                ro.add(dep)
-                if orig != dep:
-                    ro.add(orig)
+    class _PathBeneathAttr(ctypes.Structure):
+        _pack_ = 1
+        _fields_ = [("allowed_access", ctypes.c_uint64), ("parent_fd", ctypes.c_int32)]
 
-    return ro, rw
+    @staticmethod
+    @functools.lru_cache(maxsize=None)
+    def _libc():
+        """Load libc via ctypes, configuring syscall/prctl prototypes."""
+        try:
+            lib = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6",
+                              use_errno=True)
+            lib.syscall.restype = ctypes.c_long
+            lib.prctl.restype = ctypes.c_int
+            return lib
+        except Exception:
+            return None
 
+    @classmethod
+    @functools.lru_cache(maxsize=None)
+    def version(cls) -> int:
+        """Return the supported Landlock ABI version, or 0 if unavailable."""
+        if platform.machine() not in cls._ARCHES:
+            return 0
+        libc = cls._libc()
+        if libc is None:
+            return 0
+        # Kernel requires attr=NULL and size=0 when LANDLOCK_CREATE_RULESET_VERSION is set
+        ret = libc.syscall(
+            ctypes.c_long(cls._SYSCALLS[0]),
+            ctypes.c_void_p(None),
+            ctypes.c_size_t(0),
+            ctypes.c_uint32(cls._CREATE_RULESET_VERSION),
+        )
+        return int(ret) if ret >= 0 else 0
 
-def exec_landlock(profile, command):
-    """Apply Landlock + env isolation and exec the command directly.
+    @classmethod
+    def _fs_all_rights(cls, version) -> int:
+        """Return full FS access rights mask for the given Landlock ABI version."""
+        rights = (1 << 13) - 1  # v1 (5.13): bits 0–12
+        if version >= 2: rights |= cls._FS_REFER      # v2 (5.19)
+        if version >= 3: rights |= cls._FS_TRUNCATE   # v3 (6.2)
+        # v4 (6.7) added network rights only; no new FS rights
+        if version >= 5: rights |= cls._FS_IOCTL_DEV  # v5 (6.10)
+        return rights
 
-    Provides:
-      - Filesystem access allowlist (Landlock)
-      - Exec allowlist via Landlock EXECUTE right on specific binary paths
-      - Environment isolation (clearenv + setenv)
-      - die_with_parent (prctl PR_SET_PDEATHSIG)
-      - new_session (os.setsid)
+    @classmethod
+    def _add_path(cls, libc, add_nr, ruleset_fd, path, access):
+        """Add a landlock_add_rule for path; silently skips non-existent paths.
 
-    Does NOT provide: network isolation, mount/PID/UTS namespace, tmpfs, symlinks.
-    """
-    # Resolve command executable
-    exe = command[0]
-    if not os.path.isabs(exe):
-        exe = shutil.which(exe) or die(f"command '{exe}' not found on host")
+        The kernel rejects directory-only rights (READ_DIR, MAKE_*, ...) for
+        regular files, so we mask access to file-only rights for non-directories.
+        """
+        try:
+            fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
+        except OSError:
+            return
+        try:
+            if not os.path.isdir(path):
+                access &= cls._FS_FILE_ONLY
+            if not access:
+                return
+            rule = cls._PathBeneathAttr(allowed_access=access, parent_fd=fd)
+            ret = int(libc.syscall(
+                ctypes.c_long(add_nr),
+                ctypes.c_int(ruleset_fd),
+                ctypes.c_int(cls._RULE_PATH_BENEATH),
+                ctypes.byref(rule),
+                ctypes.c_uint32(0),
+            ))
+            if ret != 0:
+                err = ctypes.get_errno()
+                warn(f"landlock: add_rule failed for {path}: {os.strerror(err)}")
+        finally:
+            os.close(fd)
 
-    # Apply Landlock filesystem restrictions
-    ro, rw = collect_landlock_paths(profile, command)
-    try:
-        if not apply_landlock(ro - rw, rw):
-            warn("landlock: not available on this kernel, running unrestricted")
-    except OSError as e:
-        warn(f"landlock: {e}")
+    @classmethod
+    def _restrict(cls, ro_paths, rw_paths) -> bool:
+        """Apply Landlock filesystem restrictions before exec.
 
-    # Environment isolation
-    if "env" in profile:
-        _apply_env(profile)
+        Grants read-only (execute/read) access to ro_paths and full access to
+        rw_paths. Paths that do not exist are silently skipped.
 
-    # die_with_parent: send SIGTERM when parent exits
-    if profile.get("die_with_parent", True):
-        libc = _get_libc()
-        if libc:
-            libc.prctl(
-                ctypes.c_int(_PR_SET_PDEATHSIG), ctypes.c_ulong(_SIGTERM),
+        Note: calls prctl(PR_SET_NO_NEW_PRIVS), which prevents privilege
+        escalation and new user namespaces, making Landlock incompatible with
+        bubblewrap (which requires user namespaces).
+
+        Returns True if restrictions were applied, False if unsupported.
+        Raises OSError on syscall failure.
+        """
+        version = cls.version()
+        if version == 0:
+            return False
+        libc = cls._libc()  # guaranteed non-None when version > 0
+
+        create_nr, add_nr, restrict_nr = cls._SYSCALLS
+        all_rights = cls._fs_all_rights(version)
+        ro_rights  = cls._FS_READ_ONLY & all_rights
+
+        attr = cls._RulesetAttr(all_rights)
+        ruleset_fd = int(libc.syscall(
+            ctypes.c_long(create_nr),
+            ctypes.byref(attr),
+            ctypes.c_size_t(ctypes.sizeof(attr)),
+            ctypes.c_uint32(0),
+        ))
+        if ruleset_fd < 0:
+            err = ctypes.get_errno()
+            raise OSError(err, f"landlock_create_ruleset: {os.strerror(err)}")
+
+        try:
+            for path in sorted(ro_paths):
+                cls._add_path(libc, add_nr, ruleset_fd, path, ro_rights)
+            for path in sorted(rw_paths):
+                cls._add_path(libc, add_nr, ruleset_fd, path, all_rights)
+
+            ret = libc.prctl(
+                ctypes.c_int(cls._PR_SET_NO_NEW_PRIVS),
+                ctypes.c_ulong(1),
                 ctypes.c_ulong(0), ctypes.c_ulong(0), ctypes.c_ulong(0),
             )
+            if ret != 0:
+                err = ctypes.get_errno()
+                raise OSError(err, f"prctl(PR_SET_NO_NEW_PRIVS): {os.strerror(err)}")
 
-    # new_session
-    if profile.get("new_session", True):
+            ret = int(libc.syscall(
+                ctypes.c_long(restrict_nr),
+                ctypes.c_int(ruleset_fd),
+                ctypes.c_uint32(0),
+            ))
+            if ret != 0:
+                err = ctypes.get_errno()
+                raise OSError(err, f"landlock_restrict_self: {os.strerror(err)}")
+        finally:
+            os.close(ruleset_fd)
+
+        return True
+
+    @classmethod
+    def available(cls) -> bool:
+        return cls.version() > 0
+
+    def check_compat(self, profile) -> None:
+        self._warn_compat([
+            msg for cond, msg in [
+                (not profile.get("share_net", False),
+                 "share_net: false (network is NOT isolated)"),
+                (profile.get("hostname"),
+                 "hostname (no UTS namespace)"),
+                (profile.get("tmpfs"),
+                 "tmpfs (no mount namespace)"),
+                (profile.get("symlinks"),
+                 "symlinks (no mount namespace)"),
+                (profile.get("allowed_commands"),
+                 "allowed_commands (exec filtering is less strict than bwrap: "
+                 "binaries under ro_paths/rw_paths directories are also executable)"),
+            ] if cond
+        ])
+
+    def _collect_paths(self, profile, command):
+        """Return (ro_paths, rw_paths) as sets of absolute paths."""
+        ro = {os.path.abspath(p) for p in profile.get("ro_paths", [])}
+        rw = {os.path.abspath(p) for p in profile.get("rw_paths", [])}
+        for name in [*profile.get("allowed_commands", []), command[0]]:
+            ro |= _resolve_binary_paths(name)
+        return ro, rw
+
+    def dry_run(self, profile, command) -> None:
+        """Print the paths, environment, and command that would be sandboxed."""
+        command = self._resolve_exe(command)
+        ro, rw = self._collect_paths(profile, command)
+        env = _build_env(profile)
+
+        print("# Landlock ABI version:", self.version())
+        print("# Read-only paths:")
+        for p in sorted(ro - rw):
+            print(f"  {p}")
+        print("# Read-write paths:")
+        for p in sorted(rw):
+            print(f"  {p}")
+        print("# Environment:")
+        for k, v in sorted(env.items()):
+            print(f"  {k}={v}")
+        print("# Command:")
+        print(" ".join(self._shell_quote(a) for a in command))
+
+    def exec(self, profile, command) -> None:
+        command = self._resolve_exe(command)
+        ro, rw = self._collect_paths(profile, command)
         try:
-            os.setsid()
-        except OSError:
-            pass
+            if not self._restrict(ro - rw, rw):
+                warn("landlock: not available on this kernel, running unrestricted")
+        except OSError as e:
+            warn(f"landlock: {e}")
 
-    os.execv(exe, [exe, *command[1:]])
+        # Environment isolation (mutate os.environ so execv inherits it)
+        if "env" in profile:
+            os.environ.clear()
+            os.environ.update(_build_env(profile))
+
+        # die_with_parent: send SIGTERM when parent exits
+        if profile.get("die_with_parent", True):
+            libc = self._libc()
+            if libc:
+                libc.prctl(
+                    ctypes.c_int(self._PR_SET_PDEATHSIG), ctypes.c_ulong(self._SIGTERM),
+                    ctypes.c_ulong(0), ctypes.c_ulong(0), ctypes.c_ulong(0),
+                )
+
+        self._maybe_setsid(profile)
+        os.execv(command[0], command)
 
 
-# ---------------------------------------------------------------------------
-# Dry-run formatting
-# ---------------------------------------------------------------------------
+class SandboxExecBackend(SandboxBackend):
+    """macOS Seatbelt sandbox via sandbox-exec and SBPL profiles."""
 
-# Number of arguments each bwrap option consumes
-_BWRAP_OPT_ARITY = {
-    "--ro-bind": 2, "--ro-bind-try": 2, "--bind": 2, "--bind-try": 2,
-    "--setenv": 2, "--symlink": 2,
-    "--hostname": 1, "--tmpfs": 1, "--dev": 1, "--proc": 1, "--size": 1,
-}
+    name      = "sandbox-exec"
+    flag_attr = "sandbox_exec"
+
+    # Minimum SBPL rules required for any sandboxed process on macOS.
+    _SBPL_BASELINE = """\
+(version 1)
+(deny default)
+(allow signal (target self))
+(allow process-info-pidinfo)
+(allow sysctl-read)
+(allow mach-lookup)
+(allow file-read-metadata)
+(allow file-read*
+  (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom")
+  (literal "/dev/zero") (literal "/dev/stdin") (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (subpath "/usr/lib") (subpath "/usr/share/locale")
+  (subpath "/usr/share/zoneinfo") (subpath "/System/Library"))
+(allow file-write*
+  (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))"""
+
+    @classmethod
+    def available(cls) -> bool:
+        return sys.platform == "darwin" and bool(shutil.which("sandbox-exec"))
+
+    def check_compat(self, profile) -> None:
+        self._warn_compat([
+            msg for cond, msg in [
+                (profile.get("hostname"),
+                 "hostname (no UTS namespace)"),
+                (profile.get("tmpfs"),
+                 "tmpfs (no mount namespace)"),
+                (profile.get("symlinks"),
+                 "symlinks (no mount namespace)"),
+                (profile.get("die_with_parent", True),
+                 "die_with_parent (not supported on macOS)"),
+                (profile.get("allowed_commands"),
+                 "allowed_commands (exec filtering is path-based only, "
+                 "less strict than bwrap)"),
+            ] if cond
+        ])
+
+    @staticmethod
+    def _quote(path):
+        """Quote a path for use in an SBPL expression."""
+        return '"' + path.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+    @classmethod
+    def _path_rule(cls, ops, path):
+        """Return an SBPL allow rule using (subpath ...) for dirs, (literal ...) for files."""
+        kind = "subpath" if os.path.isdir(path) else "literal"
+        return f"(allow {ops} ({kind} {cls._quote(path)}))"
+
+    def _collect_paths(self, profile, command):
+        """Return (extra_ro, exec_paths) for the given profile and command.
+
+        extra_ro   — binary paths (command + allowed_commands) to add as read-only
+        exec_paths — same paths restricted for process-exec, or None to allow all exec
+        """
+        allowed = profile.get("allowed_commands", [])
+        extra_ro = set()
+        for name in [*allowed, command[0]]:
+            extra_ro |= _resolve_binary_paths(name)
+        exec_paths = extra_ro.copy() if allowed else None
+        return extra_ro, exec_paths
+
+    def _build_profile(self, profile, extra_ro, exec_paths):
+        """Build an SBPL sandbox profile string from a jail profile."""
+        lines = [self._SBPL_BASELINE]
+
+        all_ro = {os.path.abspath(p) for p in profile.get("ro_paths", [])} | extra_ro
+        all_rw = {os.path.abspath(p) for p in profile.get("rw_paths", [])}
+
+        for path in sorted(all_ro - all_rw):
+            lines.append(self._path_rule("file-read*", path))
+        for path in sorted(all_rw):
+            lines.append(self._path_rule("file-read* file-write*", path))
+
+        if profile.get("share_net", False):
+            lines += ["(allow network-outbound)", "(allow network-inbound)",
+                      "(allow network-bind)"]
+
+        if exec_paths is None:
+            lines.append("(allow process-exec)")
+        else:
+            for path in sorted(exec_paths):
+                lines.append(f"(allow process-exec (literal {self._quote(path)}))")
+
+        return "\n".join(lines)
+
+    def exec(self, profile, command) -> None:
+        command = self._resolve_exe(command)
+        extra_ro, exec_paths = self._collect_paths(profile, command)
+        sbpl = self._build_profile(profile, extra_ro, exec_paths)
+        self._maybe_setsid(profile)
+        os.execvpe("sandbox-exec", ["sandbox-exec", "-p", sbpl, *command],
+                   _build_env(profile))
+
+    def dry_run(self, profile, command) -> None:
+        command = self._resolve_exe(command)
+        extra_ro, exec_paths = self._collect_paths(profile, command)
+        sbpl = self._build_profile(profile, extra_ro, exec_paths)
+        print("# SBPL sandbox profile:")
+        print(sbpl)
+        print()
+        print("# Command:")
+        cmd = ["sandbox-exec", "-p", "<profile above>", *command]
+        print(" ".join(self._shell_quote(a) for a in cmd))
 
 
-def format_argv(argv):
-    """Format a bwrap argv as a readable, copy-pasteable shell command."""
-    def quote(s):
-        return f"'{s}'" if " " in s or not s else s
+# Preferred auto-detection order: strongest isolation first
+_BACKENDS: list[type[SandboxBackend]] = [BwrapBackend, SandboxExecBackend, LandlockBackend]
 
-    parts = []
-    i = 0
-    while i < len(argv):
-        arity = _BWRAP_OPT_ARITY.get(argv[i], 0)
-        parts.append(" ".join(quote(argv[i + j]) for j in range(arity + 1)))
-        i += arity + 1
-    return " \\\n  ".join(parts)
+
+def _select_backend(args, profile) -> SandboxBackend:
+    """Return the appropriate backend instance for the given args and profile.
+
+    Explicit flags (--bwrap / --sandbox-exec / --landlock) take precedence.
+    Otherwise, the first available backend in _BACKENDS order is used,
+    skipping bwrap when the profile sets ``bwrap: false``.
+    """
+    # Honour explicit backend flags
+    for cls in _BACKENDS:
+        if getattr(args, cls.flag_attr, False):
+            if not cls.available():
+                die(f"--{cls.flag_attr.replace('_', '-')} requested "
+                    f"but {cls.name} is not available")
+            return cls()
+
+    # Auto-detect: first available backend, optionally excluding bwrap
+    skip_bwrap = not profile.get("bwrap", True)
+    candidates = (cls for cls in _BACKENDS if not (skip_bwrap and cls is BwrapBackend)
+                  and cls.available())
+    cls = next(candidates, None)
+
+    if cls is None:
+        if skip_bwrap:
+            die("profile sets bwrap: false but no alternative backend is available "
+                "(sandbox-exec on macOS or Landlock on Linux 5.13+)")
+        die("no sandbox backend available "
+            "(install bwrap, use macOS with sandbox-exec, "
+            "or use a kernel with Landlock support, Linux 5.13+)")
+
+    if cls is LandlockBackend:
+        warn("bwrap not found, falling back to Landlock")
+
+    return cls()
 
 
 # ---------------------------------------------------------------------------
@@ -645,11 +856,11 @@ def format_argv(argv):
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Sandbox a process using bubblewrap (default) or Linux Landlock LSM. "
-            "The two backends are mutually exclusive."
+            "Sandbox a process using bubblewrap (default on Linux), macOS sandbox-exec "
+            "(default on macOS), or Linux Landlock LSM. Backends are mutually exclusive."
         ),
         usage="%(prog)s -c CONFIG -p PROFILE [--ro PATH] [--rw PATH] "
-              "[--landlock] [--dry-run] [--] COMMAND [ARGS...]",
+              "[--bwrap | --sandbox-exec | --landlock] [--dry-run] [--] COMMAND [ARGS...]",
     )
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config file")
     parser.add_argument("-p", "--profile", required=True, help="Profile name to use")
@@ -659,16 +870,17 @@ def parse_args():
                         help="Additional read-write path (repeatable)")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--bwrap", action="store_true",
-                       help="Use bubblewrap (default if installed)")
+                       help="Use bubblewrap (default on Linux if installed)")
+    group.add_argument("--sandbox-exec", dest="sandbox_exec", action="store_true",
+                       help="Use macOS sandbox-exec (default on macOS)")
     group.add_argument("--landlock", action="store_true",
                        help="Use Linux Landlock LSM (default if bwrap is not installed)")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Print the bwrap command without executing (bwrap mode only)")
+                        help="Print the sandbox command without executing")
     parser.add_argument("command", nargs=argparse.REMAINDER,
                         help="Command to run inside the sandbox")
     args = parser.parse_args()
 
-    # Strip leading '--' separator
     command = args.command
     if command and command[0] == "--":
         command = command[1:]
@@ -683,56 +895,18 @@ def main():
     args = parse_args()
     profile = load_profile(args.config, args.profile)
 
-    # Merge CLI paths into profile
     if args.ro:
         profile.setdefault("ro_paths", []).extend(os.path.abspath(p) for p in args.ro)
     if args.rw:
         profile.setdefault("rw_paths", []).extend(os.path.abspath(p) for p in args.rw)
 
-    bwrap_available    = bool(shutil.which("bwrap"))
-    landlock_available = landlock_version() > 0
-
-    # Resolve which backend to use
-    if args.bwrap:
-        if not bwrap_available:
-            die("--bwrap requested but bwrap is not installed")
-        use_bwrap = True
-    elif args.landlock:
-        if not landlock_available:
-            die("--landlock requested but Landlock is not supported on this kernel")
-        use_bwrap = False
-    elif not profile.get("bwrap", True):
-        # Profile explicitly opts in to Landlock mode
-        if not landlock_available:
-            die("profile sets bwrap: false but Landlock is not supported on this kernel")
-        use_bwrap = False
-    elif bwrap_available:
-        use_bwrap = True
-    elif landlock_available:
-        warn("bwrap not found, falling back to Landlock")
-        use_bwrap = False
-    else:
-        die("no sandbox backend available "
-            "(install bwrap or use a kernel with Landlock support, Linux 5.13+)")
-
-    _check_profile_compat(profile, use_bwrap)
-
-    # --- Landlock mode ---
-    if not use_bwrap:
-        if args.dry_run:
-            warn("--dry-run has no effect in Landlock mode")
-            return
-        exec_landlock(profile, args.command)
-        return  # unreachable — exec replaces the process
-
-    # --- Bwrap mode ---
-    argv = build_bwrap_argv(profile, args.command)
+    sandbox_backend = _select_backend(args, profile)
+    sandbox_backend.check_compat(profile)
 
     if args.dry_run:
-        print(format_argv(argv))
-        return
-
-    os.execvp("bwrap", argv)
+        sandbox_backend.dry_run(profile, args.command)
+    else:
+        sandbox_backend.exec(profile, args.command)
 
 
 if __name__ == "__main__":
