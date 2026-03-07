@@ -11,6 +11,7 @@
 #   new_session       - create a new terminal session (default: true)
 #   die_with_parent   - kill sandbox when parent exits (default: true)
 #   hostname          - custom hostname inside the sandbox
+#   bwrap             - sandbox backend: true = bubblewrap (default), false = Landlock
 #
 # Paths support ~ for home directory expansion.
 #
