@@ -534,6 +534,7 @@ class LandlockBackend(SandboxBackend):
         _fields_ = [("handled_access_fs", ctypes.c_uint64)]
 
     class _PathBeneathAttr(ctypes.Structure):
+        _layout_ = "ms"
         _pack_ = 1
         _fields_ = [("allowed_access", ctypes.c_uint64), ("parent_fd", ctypes.c_int32)]
 
@@ -762,13 +763,15 @@ class SandboxExecBackend(SandboxBackend):
 (allow sysctl-read)
 (allow file-read-metadata)
 (allow file-read*
-  (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom")
-  (literal "/dev/zero") (literal "/dev/stdin") (literal "/dev/stdout")
-  (literal "/dev/stderr")
-  (subpath "/usr/lib") (subpath "/usr/share/locale")
+  (literal "/") (literal "/dev/null") (literal "/dev/random")
+  (literal "/dev/urandom") (literal "/dev/zero") (literal "/dev/stdin")
+  (literal "/dev/stdout") (literal "/dev/stderr")
+  (subpath "/usr/lib") (subpath "/usr/share/locale") (subpath "/usr/share/icu")
   (subpath "/usr/share/zoneinfo") (subpath "/System/Library"))
 (allow file-write*
-  (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))"""
+  (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))
+(allow file-ioctl
+  (literal "/dev/tty") (regex #"^/dev/ttys[0-9]+$"))"""
 
     @classmethod
     def available(cls) -> bool:
@@ -821,7 +824,31 @@ class SandboxExecBackend(SandboxBackend):
             paths |= _resolve_binary_paths(name)
         return paths
 
-    def _build_profile(self, profile, ro, rw, exec_paths):
+    @staticmethod
+    def _traversal_dirs(paths):
+        """Return intermediate parent directories needed for SBPL path traversal.
+
+        SBPL requires file-read* on each ancestor directory for the kernel to
+        resolve path components when opening a target file.  Returns ancestors
+        not already covered by an existing path (exact match or subpath of a
+        directory in *paths*).
+        """
+        # Collect directory paths that have subpath coverage (directories get
+        # (subpath ...) rules, so anything underneath is already covered)
+        dir_paths = {p for p in paths if os.path.isdir(p)}
+
+        parents = set()
+        for path in paths:
+            parent = os.path.dirname(path)
+            while parent != '/':
+                if parent in dir_paths:
+                    break  # already covered by (subpath ...) rule
+                parents.add(parent)
+                parent = os.path.dirname(parent)
+        parents -= paths
+        return parents
+
+    def _build_profile(self, profile, ro, rw, exec_paths, traversal_dirs=frozenset()):
         """Build an SBPL sandbox profile string from a jail profile."""
         lines = [self._SBPL_BASELINE]
 
@@ -832,6 +859,11 @@ class SandboxExecBackend(SandboxBackend):
                 lines.append(f"(allow mach-lookup (global-name {self._quote(svc)}))")
         else:
             lines.append("(allow mach-lookup)")
+
+        # Intermediate directory rules for path traversal (listing only)
+        if traversal_dirs:
+            literals = " ".join(f"(literal {self._quote(p)})" for p in sorted(traversal_dirs))
+            lines.append(f"(allow file-read* {literals})")
 
         for path in sorted(ro - rw):
             lines.append(self._path_rule("file-read*", path))
@@ -854,13 +886,17 @@ class SandboxExecBackend(SandboxBackend):
         """Resolve the command and build the SBPL profile. Returns (command, sbpl)."""
         command = self._resolve_exe(command)
         ro, rw = self._collect_paths(profile, command)
-        sbpl = self._build_profile(profile, ro, rw, self._exec_paths(profile, command))
+        traversal = self._traversal_dirs(ro | rw)
+        sbpl = self._build_profile(profile, ro, rw,
+                                   self._exec_paths(profile, command), traversal)
         return command, sbpl
 
     def exec(self, profile, command) -> None:
         command, sbpl = self._prepare(profile, command)
         self._maybe_setsid(profile)
-        self._close_nonstandard_fds()
+        # Note: no _close_nonstandard_fds() here — sandbox-exec is an external
+        # wrapper; os.execvpe needs Python-internal fds until the exec completes.
+        # sandbox-exec itself handles the sandboxed child's fd inheritance.
         os.execvpe("sandbox-exec", ["sandbox-exec", "-p", sbpl, *command],
                    _build_env(profile))
 

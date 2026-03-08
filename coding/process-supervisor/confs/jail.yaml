@@ -134,6 +134,7 @@ profiles:
       - xargs
       - tee
       - tr
+      - plutil
 
     env:
       HOME: "~"
