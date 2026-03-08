@@ -995,6 +995,8 @@ def main():
     args = parse_args()
     profile = load_profile(args.config, args.profile)
 
+    profile.setdefault("rw_paths", []).append(os.getcwd())
+
     if args.ro:
         profile.setdefault("ro_paths", []).extend(os.path.abspath(p) for p in args.ro)
     if args.rw:
