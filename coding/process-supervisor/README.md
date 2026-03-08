@@ -1,9 +1,9 @@
 # Process supervision & monitoring tools
 
-Tools to monitor and sandbox processes on Linux. While primarily developed to supervise AI coding agents, all tools work with any process.
+Tools to monitor and sandbox processes on Linux and macOS. While primarily developed to supervise AI coding agents, all tools work with any process.
 
 - **Monitoring** — [bpftrace](https://github.com/bpftrace/bpftrace) scripts that trace what a process and all its descendants are doing (exec, file, network, suspicious ops) using kernel tracepoints, kprobes, and uprobes. Requires Linux with BTF support (`CONFIG_DEBUG_INFO_BTF=y`), bpftrace >= 0.21.
-- **Sandboxing** — a [bubblewrap](https://github.com/containers/bubblewrap) wrapper that jails processes with configurable filesystem, command, and network restrictions. Requires bwrap, Python 3.6+, PyYAML.
+- **Sandboxing** — a multi-backend jailing script that sandboxes processes with configurable filesystem, command, and network restrictions. Requires Python 3.6+ and PyYAML. Backend-specific requirements: [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`) on Linux, `sandbox-exec` on macOS (available by default), or Linux kernel 5.13+ for Landlock (no extra dependencies).
 
 Example configuration files for popular AI coding agents are provided in the `confs/` directory.
 
@@ -11,7 +11,7 @@ Example configuration files for popular AI coding agents are provided in the `co
 
 - [Key tools](#key-tools)
   - [monitor-process.sh](#monitor-processsh) — all-in-one bpftrace monitoring wrapper
-  - [jail-process.py](#jail-processpy) — bubblewrap sandboxing / jailing
+  - [jail-process.py](#jail-processpy) — multi-backend process sandboxing / jailing
 - [Individual bpftrace scripts](#individual-bpftrace-scripts)
   - [trace-execs.bt](#trace-execsbt)
   - [trace-netcalls.bt](#trace-netcallsbt)
@@ -47,24 +47,41 @@ See `./monitor-process.sh -h` for all options.
 
 ### jail-process.py
 
-Wraps [bubblewrap](https://github.com/containers/bubblewrap) to sandbox any process with least-privilege restrictions. Uses YAML profiles to configure what the process can access.
+Sandboxes any process using one of three backends, selected automatically based on the platform or overridden with a flag. Uses YAML profiles to configure what the process can access.
 
-**What it restricts:**
+**Backends (mutually exclusive):**
+
+| Flag | Backend | Platform | Isolation strength |
+|---|---|---|---|
+| `--bwrap` | [bubblewrap](https://github.com/containers/bubblewrap) | Linux | Strongest — full namespace isolation (PID, mount, network, user, IPC, UTS) |
+| `--sandbox-exec` | macOS Seatbelt (`sandbox-exec`) | macOS | SBPL-based filesystem + network + exec control |
+| `--landlock` | Linux Landlock LSM | Linux 5.13+ | Kernel-enforced filesystem allowlist; no namespace isolation |
+
+The default is the first available backend in the order above. On Linux, bwrap is preferred; if absent, Landlock is used. On macOS, `sandbox-exec` is used. A profile can set `bwrap: false` to skip bwrap and prefer Landlock instead.
+
+**What it restricts (bwrap, strongest):**
 - **Filesystem** — only explicitly listed paths are mounted (read-only or read-write)
-- **Commands** — only whitelisted binaries are available; `/usr/bin` is NOT mounted wholesale
+- **Commands** — only allowlisted binaries are available; `/usr/bin` is NOT mounted wholesale
 - **Namespaces** — `--unshare-all` by default (PID, mount, network, user, IPC, UTS, cgroup)
 - **Network** — denied by default, must be explicitly enabled per profile
 - **Environment** — cleared and rebuilt from config only
 
+Landlock and `sandbox-exec` enforce filesystem and exec restrictions but do not provide namespace or network isolation (Landlock) or mount/UTS namespaces (both). Warnings are printed when a profile option is unsupported by the selected backend.
+
 ```
-# Dry-run — inspect the generated bwrap command
+# Dry-run — inspect what the sandbox would do (output depends on backend)
 ./jail-process.py -c confs/jail.yaml -p claude --dry-run -- claude
 
-# Run a process inside the sandbox
+# Run a process inside the sandbox (auto-selects backend)
 ./jail-process.py -c confs/jail.yaml -p claude -- claude
 
 # Add extra mounts from the command line
 ./jail-process.py -c confs/jail.yaml -p claude --rw ~/myproject --ro /opt/data -- claude
+
+# Explicitly select a backend
+./jail-process.py -c confs/jail.yaml -p claude --bwrap -- claude
+./jail-process.py -c confs/jail.yaml -p claude --landlock -- claude
+./jail-process.py -c confs/jail.yaml -p claude --sandbox-exec -- claude
 ```
 
 See `./jail-process.py -h` for all options.
@@ -74,7 +91,7 @@ See `./jail-process.py -h` for all options.
 - `~` expansion in all path fields for portable configs
 - Automatic script dependency scanning — shell wrapper shebangs and `exec` targets are resolved and bound
 - Binaries are bound at all their paths (canonical, `which`, and realpath) so they work regardless of how they're referenced
-- `--dry-run` prints a readable, copy-pasteable bwrap command
+- `--dry-run` prints a readable summary of what would be sandboxed (bwrap command, Landlock path list, or SBPL profile)
 - `--ro`/`--rw` CLI flags to add extra mounts without editing the config
 
 ## Individual bpftrace scripts
