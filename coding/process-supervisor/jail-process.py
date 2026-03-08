@@ -534,6 +534,7 @@ class LandlockBackend(SandboxBackend):
         _fields_ = [("handled_access_fs", ctypes.c_uint64)]
 
     class _PathBeneathAttr(ctypes.Structure):
+        _layout_ = "ms"
         _pack_ = 1
         _fields_ = [("allowed_access", ctypes.c_uint64), ("parent_fd", ctypes.c_int32)]
 
@@ -860,7 +861,9 @@ class SandboxExecBackend(SandboxBackend):
     def exec(self, profile, command) -> None:
         command, sbpl = self._prepare(profile, command)
         self._maybe_setsid(profile)
-        self._close_nonstandard_fds()
+        # Note: no _close_nonstandard_fds() here — sandbox-exec is an external
+        # wrapper; os.execvpe needs Python-internal fds until the exec completes.
+        # sandbox-exec itself handles the sandboxed child's fd inheritance.
         os.execvpe("sandbox-exec", ["sandbox-exec", "-p", sbpl, *command],
                    _build_env(profile))
 
