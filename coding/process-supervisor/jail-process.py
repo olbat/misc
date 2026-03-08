@@ -763,9 +763,9 @@ class SandboxExecBackend(SandboxBackend):
 (allow sysctl-read)
 (allow file-read-metadata)
 (allow file-read*
-  (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom")
-  (literal "/dev/zero") (literal "/dev/stdin") (literal "/dev/stdout")
-  (literal "/dev/stderr")
+  (literal "/") (literal "/dev/null") (literal "/dev/random")
+  (literal "/dev/urandom") (literal "/dev/zero") (literal "/dev/stdin")
+  (literal "/dev/stdout") (literal "/dev/stderr")
   (subpath "/usr/lib") (subpath "/usr/share/locale")
   (subpath "/usr/share/zoneinfo") (subpath "/System/Library"))
 (allow file-write*
@@ -822,7 +822,7 @@ class SandboxExecBackend(SandboxBackend):
             paths |= _resolve_binary_paths(name)
         return paths
 
-    def _build_profile(self, profile, ro, rw, exec_paths):
+    def _build_profile(self, profile, ro, rw, exec_paths, traversal_dirs=frozenset()):
         """Build an SBPL sandbox profile string from a jail profile."""
         lines = [self._SBPL_BASELINE]
 
@@ -833,6 +833,11 @@ class SandboxExecBackend(SandboxBackend):
                 lines.append(f"(allow mach-lookup (global-name {self._quote(svc)}))")
         else:
             lines.append("(allow mach-lookup)")
+
+        # Intermediate directory rules for path traversal (listing only)
+        if traversal_dirs:
+            literals = " ".join(f"(literal {self._quote(p)})" for p in sorted(traversal_dirs))
+            lines.append(f"(allow file-read* {literals})")
 
         for path in sorted(ro - rw):
             lines.append(self._path_rule("file-read*", path))
@@ -851,11 +856,35 @@ class SandboxExecBackend(SandboxBackend):
 
         return "\n".join(lines)
 
+    @staticmethod
+    def _traversal_dirs(paths):
+        """Return intermediate parent directories needed for SBPL path traversal.
+
+        SBPL requires explicit file-read* on each ancestor directory to reach
+        an allowed target.  Returns only the ancestors not already in *paths*,
+        using (literal ...) semantics (single-directory listing, not subtree).
+        """
+        parents = set()
+        for path in paths:
+            parent = os.path.dirname(path)
+            while parent != '/':
+                parents.add(parent)
+                parent = os.path.dirname(parent)
+        parents -= paths
+        return parents
+
     def _prepare(self, profile, command):
         """Resolve the command and build the SBPL profile. Returns (command, sbpl)."""
         command = self._resolve_exe(command)
         ro, rw = self._collect_paths(profile, command)
-        sbpl = self._build_profile(profile, ro, rw, self._exec_paths(profile, command))
+
+        # Compute intermediate parent dirs needing (literal ...) for path traversal.
+        # We grant only (literal ...) — directory listing for that single directory —
+        # NOT (subpath ...) which would expose everything beneath.
+        traversal = self._traversal_dirs(ro | rw | {os.getcwd()})
+
+        sbpl = self._build_profile(profile, ro, rw,
+                                   self._exec_paths(profile, command), traversal)
         return command, sbpl
 
     def exec(self, profile, command) -> None:
