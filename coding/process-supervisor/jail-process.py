@@ -40,13 +40,16 @@ import functools
 import os
 import platform
 import re
+import shlex
 import shutil
+import stat
 import sys
+from typing import NoReturn
 
 import yaml
 
 
-def die(msg):
+def die(msg) -> NoReturn:
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(1)
 
@@ -61,8 +64,13 @@ def warn(msg):
 
 def load_profile(config_path, profile_name):
     """Load a named profile from the YAML config, with ~ expansion."""
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        die(f"config file not found: {config_path}")
+    except yaml.YAMLError as e:
+        die(f"config file parse error: {e}")
 
     profiles = config.get("profiles") or die("config file has no 'profiles' key")
     if profile_name not in profiles:
@@ -127,7 +135,7 @@ def scan_script_deps(path, _seen=None):
 
     try:
         with open(path, "r", errors="replace") as f:
-            lines = f.readlines(4096)
+            lines = [f.readline() for _ in range(50)]
     except OSError:
         return []
 
@@ -236,6 +244,7 @@ class BwrapBuilder:
         if path in self._mounts:
             return
         self._mounts.add(path)
+        self._bound.add(path)  # prevent bind_binary from emitting a duplicate bind
         if os.path.exists(path):
             self._add("--ro-bind" if readonly else "--bind", path, path)
         else:
@@ -253,8 +262,10 @@ class BwrapBuilder:
             self._add("--symlink", target, link_path)
 
     def add_env(self, profile):
+        if "env" not in profile:
+            return  # bwrap inherits calling process's environment by default
         self._add("--clearenv")
-        for var, value in profile.get("env", {}).items():
+        for var, value in profile["env"].items():
             value = str(value)
             if value.startswith("$"):
                 value = os.environ.get(value[1:], "")
@@ -309,6 +320,12 @@ class BwrapBuilder:
         self._ro_bind_at(real_path, exe)
         if real_path != exe:
             self._ro_bind_at(real_path, real_path)
+        # Bind script dependencies (shebang interpreters, exec targets)
+        for orig, real in scan_script_deps(real_path):
+            if os.path.exists(real):
+                self._ro_bind_at(real, real)
+                if orig != real:
+                    self._ro_bind_at(real, orig)
         return list(command)
 
     def finalize(self, command):
@@ -376,6 +393,8 @@ class SandboxBackend(abc.ABC):
         exe = command[0]
         if not os.path.isabs(exe):
             exe = shutil.which(exe) or die(f"command '{exe}' not found on host")
+        elif not os.path.exists(exe):
+            die(f"command '{exe}' does not exist")
         return [exe, *command[1:]]
 
     @staticmethod
@@ -384,13 +403,41 @@ class SandboxBackend(abc.ABC):
         if profile.get("new_session", True):
             try:
                 os.setsid()
-            except OSError:
-                pass
+            except OSError as e:
+                # EPERM means we are already a session leader; that's fine
+                if e.errno != 1:  # EPERM
+                    die(f"setsid: {e}")
+                warn(f"setsid: already session leader (pid {os.getpid()})")
+
+    @staticmethod
+    def _close_nonstandard_fds() -> None:
+        """Close all file descriptors above stderr (3+) before exec.
+
+        Prevents leaking parent/Python-internal fds into the sandboxed process,
+        which could bypass filesystem restrictions via inherited open handles.
+        """
+        try:
+            max_fd = os.sysconf("SC_OPEN_MAX")
+        except (ValueError, OSError):
+            max_fd = 1024
+        os.closerange(3, max_fd)
 
     @staticmethod
     def _shell_quote(s: str) -> str:
-        """Single-quote a token for display as part of a shell command."""
-        return f"'{s}'" if " " in s or not s else s
+        """Quote a token for display as part of a shell command."""
+        return shlex.quote(s)
+
+    def _collect_paths(self, profile, command):
+        """Return (ro_paths, rw_paths) as sets of absolute paths.
+
+        Combines the profile's ro/rw path lists with the resolved binary paths
+        for command and every entry in allowed_commands (including shebang deps).
+        """
+        ro = {os.path.abspath(p) for p in profile.get("ro_paths", [])}
+        rw = {os.path.abspath(p) for p in profile.get("rw_paths", [])}
+        for name in [*profile.get("allowed_commands", []), command[0]]:
+            ro |= _resolve_binary_paths(name)
+        return ro, rw
 
 
 class BwrapBackend(SandboxBackend):
@@ -438,7 +485,8 @@ class BwrapBackend(SandboxBackend):
         return " \\\n  ".join(parts)
 
     def exec(self, profile, command) -> None:
-        os.execvp("bwrap", self._build_argv(profile, command))
+        bwrap = shutil.which("bwrap") or die("bwrap not found")
+        os.execv(bwrap, self._build_argv(profile, command))
 
     def dry_run(self, profile, command) -> None:
         print(self._format_argv(self._build_argv(profile, command)))
@@ -540,9 +588,10 @@ class LandlockBackend(SandboxBackend):
         try:
             fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
         except OSError:
+            warn(f"landlock: path does not exist, skipping: {path}")
             return
         try:
-            if not os.path.isdir(path):
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
                 access &= cls._FS_FILE_ONLY
             if not access:
                 return
@@ -556,7 +605,7 @@ class LandlockBackend(SandboxBackend):
             ))
             if ret != 0:
                 err = ctypes.get_errno()
-                warn(f"landlock: add_rule failed for {path}: {os.strerror(err)}")
+                raise OSError(err, f"landlock_add_rule({path}): {os.strerror(err)}")
         finally:
             os.close(fd)
 
@@ -643,14 +692,6 @@ class LandlockBackend(SandboxBackend):
             ] if cond
         ])
 
-    def _collect_paths(self, profile, command):
-        """Return (ro_paths, rw_paths) as sets of absolute paths."""
-        ro = {os.path.abspath(p) for p in profile.get("ro_paths", [])}
-        rw = {os.path.abspath(p) for p in profile.get("rw_paths", [])}
-        for name in [*profile.get("allowed_commands", []), command[0]]:
-            ro |= _resolve_binary_paths(name)
-        return ro, rw
-
     def dry_run(self, profile, command) -> None:
         """Print the paths, environment, and command that would be sandboxed."""
         command = self._resolve_exe(command)
@@ -675,26 +716,34 @@ class LandlockBackend(SandboxBackend):
         ro, rw = self._collect_paths(profile, command)
         try:
             if not self._restrict(ro - rw, rw):
-                warn("landlock: not available on this kernel, running unrestricted")
+                die("landlock: not available on this kernel; "
+                    "refusing to run unrestricted")
         except OSError as e:
-            warn(f"landlock: {e}")
+            die(f"landlock: {e}")
 
         # Environment isolation (mutate os.environ so execv inherits it)
         if "env" in profile:
             os.environ.clear()
             os.environ.update(_build_env(profile))
 
+        # setsid before PR_SET_PDEATHSIG (setsid may clear it on some kernels)
+        self._maybe_setsid(profile)
+
         # die_with_parent: send SIGTERM when parent exits
         if profile.get("die_with_parent", True):
             libc = self._libc()
             if libc:
-                libc.prctl(
+                ret = libc.prctl(
                     ctypes.c_int(self._PR_SET_PDEATHSIG), ctypes.c_ulong(self._SIGTERM),
                     ctypes.c_ulong(0), ctypes.c_ulong(0), ctypes.c_ulong(0),
                 )
-
-        self._maybe_setsid(profile)
-        os.execv(command[0], command)
+                if ret != 0:
+                    die(f"prctl(PR_SET_PDEATHSIG): {os.strerror(ctypes.get_errno())}")
+        self._close_nonstandard_fds()
+        try:
+            os.execv(command[0], command)
+        except OSError as e:
+            die(f"exec {command[0]!r}: {e}")
 
 
 class SandboxExecBackend(SandboxBackend):
@@ -708,9 +757,9 @@ class SandboxExecBackend(SandboxBackend):
 (version 1)
 (deny default)
 (allow signal (target self))
+(allow process-fork)
 (allow process-info-pidinfo)
 (allow sysctl-read)
-(allow mach-lookup)
 (allow file-read-metadata)
 (allow file-read*
   (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom")
@@ -739,6 +788,9 @@ class SandboxExecBackend(SandboxBackend):
                 (profile.get("allowed_commands"),
                  "allowed_commands (exec filtering is path-based only, "
                  "less strict than bwrap)"),
+                (not profile.get("mach_services"),
+                 "mach_services not set: all Mach IPC lookups are allowed "
+                 "(set mach_services list in profile to restrict)"),
             ] if cond
         ])
 
@@ -753,29 +805,37 @@ class SandboxExecBackend(SandboxBackend):
         kind = "subpath" if os.path.isdir(path) else "literal"
         return f"(allow {ops} ({kind} {cls._quote(path)}))"
 
-    def _collect_paths(self, profile, command):
-        """Return (extra_ro, exec_paths) for the given profile and command.
+    def _exec_paths(self, profile, command):
+        """Return the set of binary paths allowed for process-exec, or None.
 
-        extra_ro   — binary paths (command + allowed_commands) to add as read-only
-        exec_paths — same paths restricted for process-exec, or None to allow all exec
+        Returns None when allowed_commands is absent, meaning all exec is allowed.
+        Otherwise returns the resolved binary paths for command and allowed_commands
+        only (not all ro_paths), since exec allowlisting is restricted to explicitly
+        listed commands.
         """
         allowed = profile.get("allowed_commands", [])
-        extra_ro = set()
+        if not allowed:
+            return None
+        paths = set()
         for name in [*allowed, command[0]]:
-            extra_ro |= _resolve_binary_paths(name)
-        exec_paths = extra_ro.copy() if allowed else None
-        return extra_ro, exec_paths
+            paths |= _resolve_binary_paths(name)
+        return paths
 
-    def _build_profile(self, profile, extra_ro, exec_paths):
+    def _build_profile(self, profile, ro, rw, exec_paths):
         """Build an SBPL sandbox profile string from a jail profile."""
         lines = [self._SBPL_BASELINE]
 
-        all_ro = {os.path.abspath(p) for p in profile.get("ro_paths", [])} | extra_ro
-        all_rw = {os.path.abspath(p) for p in profile.get("rw_paths", [])}
+        # Mach IPC: restrict to listed services if configured, otherwise allow all
+        mach_services = profile.get("mach_services")
+        if mach_services:
+            for svc in mach_services:
+                lines.append(f"(allow mach-lookup (global-name {self._quote(svc)}))")
+        else:
+            lines.append("(allow mach-lookup)")
 
-        for path in sorted(all_ro - all_rw):
+        for path in sorted(ro - rw):
             lines.append(self._path_rule("file-read*", path))
-        for path in sorted(all_rw):
+        for path in sorted(rw):
             lines.append(self._path_rule("file-read* file-write*", path))
 
         if profile.get("share_net", False):
@@ -790,18 +850,22 @@ class SandboxExecBackend(SandboxBackend):
 
         return "\n".join(lines)
 
-    def exec(self, profile, command) -> None:
+    def _prepare(self, profile, command):
+        """Resolve the command and build the SBPL profile. Returns (command, sbpl)."""
         command = self._resolve_exe(command)
-        extra_ro, exec_paths = self._collect_paths(profile, command)
-        sbpl = self._build_profile(profile, extra_ro, exec_paths)
+        ro, rw = self._collect_paths(profile, command)
+        sbpl = self._build_profile(profile, ro, rw, self._exec_paths(profile, command))
+        return command, sbpl
+
+    def exec(self, profile, command) -> None:
+        command, sbpl = self._prepare(profile, command)
         self._maybe_setsid(profile)
+        self._close_nonstandard_fds()
         os.execvpe("sandbox-exec", ["sandbox-exec", "-p", sbpl, *command],
                    _build_env(profile))
 
     def dry_run(self, profile, command) -> None:
-        command = self._resolve_exe(command)
-        extra_ro, exec_paths = self._collect_paths(profile, command)
-        sbpl = self._build_profile(profile, extra_ro, exec_paths)
+        command, sbpl = self._prepare(profile, command)
         print("# SBPL sandbox profile:")
         print(sbpl)
         print()
@@ -843,7 +907,7 @@ def _select_backend(args, profile) -> SandboxBackend:
             "(install bwrap, use macOS with sandbox-exec, "
             "or use a kernel with Landlock support, Linux 5.13+)")
 
-    if cls is LandlockBackend:
+    if cls is LandlockBackend and not skip_bwrap:
         warn("bwrap not found, falling back to Landlock")
 
     return cls()
@@ -902,6 +966,10 @@ def main():
 
     sandbox_backend = _select_backend(args, profile)
     sandbox_backend.check_compat(profile)
+
+    if "env" not in profile:
+        die("no 'env' key in profile: the full host environment would be passed "
+            "to the sandbox (add an 'env' key to the profile to specify allowed variables)")
 
     if args.dry_run:
         sandbox_backend.dry_run(profile, args.command)
