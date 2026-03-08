@@ -530,6 +530,11 @@ class LandlockBackend(SandboxBackend):
     _PR_SET_PDEATHSIG       = 1
     _SIGTERM                = 15
 
+    # Paths that bwrap provides via --proc/--dev; always added as ro/rw since
+    # Landlock has no mount namespace and processes need these pseudo-fs paths.
+    _ESSENTIAL_RO_PATHS = ("/proc", "/sys")
+    _ESSENTIAL_RW_PATHS = ("/dev",)   # /dev/null, /dev/urandom, /dev/tty, etc.
+
     class _RulesetAttr(ctypes.Structure):
         _fields_ = [("handled_access_fs", ctypes.c_uint64)]
 
@@ -692,6 +697,33 @@ class LandlockBackend(SandboxBackend):
                  "binaries under ro_paths/rw_paths directories are also executable)"),
             ] if cond
         ])
+
+    def _collect_paths(self, profile, command):
+        """Extend the base path collection with Landlock-specific requirements.
+
+        Adds _ESSENTIAL_RO_PATHS and _ESSENTIAL_RW_PATHS (which bwrap provides
+        via --proc/--dev) since Landlock has no mount namespace and processes
+        need these pseudo-fs paths (e.g. Bun/JSC reads /proc/self/maps for GC,
+        /dev/urandom for crypto).
+
+        Also promotes tmpfs paths to host rw_paths since Landlock cannot create
+        new mounts; the process will access the real host path instead of a
+        fresh tmpfs — this is already flagged by check_compat.
+        """
+        ro, rw = super()._collect_paths(profile, command)
+
+        for p in self._ESSENTIAL_RO_PATHS:
+            if os.path.exists(p):
+                ro.add(p)
+        for p in self._ESSENTIAL_RW_PATHS:
+            if os.path.exists(p):
+                rw.add(p)
+
+        for entry in profile.get("tmpfs", []):
+            path = entry["path"] if isinstance(entry, dict) else entry
+            rw.add(os.path.abspath(path))
+
+        return ro, rw
 
     def dry_run(self, profile, command) -> None:
         """Print the paths, environment, and command that would be sandboxed."""
