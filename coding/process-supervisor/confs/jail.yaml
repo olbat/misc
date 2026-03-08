@@ -100,7 +100,6 @@ profiles:
       - /etc/ca-certificates
 
     rw_paths:
-      - ~/project
       - ~/.claude              # agent state (history, cache, settings)
       - ~/.claude.json         # agent config
 
@@ -165,7 +164,6 @@ profiles:
       - /etc/ca-certificates
 
     rw_paths:
-      - ~/project
       - ~/.config/aider        # agent config
       - ~/.aider.conf.yml      # agent config (alt location)
 
@@ -225,7 +223,6 @@ profiles:
       - /etc/ca-certificates
 
     rw_paths:
-      - ~/project
       - ~/.codex               # agent state
 
     allowed_commands:
@@ -288,7 +285,6 @@ profiles:
       - /etc/ca-certificates
 
     rw_paths:
-      - ~/project
       - ~/.cline               # agent state
 
     allowed_commands:
@@ -351,7 +347,6 @@ profiles:
       - /etc/ca-certificates
 
     rw_paths:
-      - ~/project
       - ~/.config/goose        # agent config/state
 
     allowed_commands:
@@ -409,7 +404,6 @@ profiles:
       - /etc/ca-certificates
 
     rw_paths:
-      - ~/project
       - ~/.continue            # agent state
 
     allowed_commands:
@@ -472,7 +466,6 @@ profiles:
       - /etc/ca-certificates
 
     rw_paths:
-      - ~/project
       - ~/.openhands           # agent state
 
     allowed_commands:
