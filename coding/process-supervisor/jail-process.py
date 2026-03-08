@@ -254,8 +254,7 @@ class BwrapBuilder:
 
     def add_allowed_commands(self, profile):
         for name in profile.get("allowed_commands", []):
-            if not self.bind_binary(name):
-                die(f"allowed_command '{name}' not found on host")
+            self.bind_binary(name)
 
     def add_symlinks(self, profile):
         for link_path, target in profile.get("symlinks", {}).items():
