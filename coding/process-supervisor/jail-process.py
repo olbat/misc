@@ -24,12 +24,12 @@ Usage:
                 [--bwrap | --sandbox-exec | --landlock] [--dry-run] [--] COMMAND [ARGS...]
 
 Example:
-  jail-process.py -c confs/jail.yaml -p claude -- claude --resume
-  jail-process.py -c confs/jail.yaml -p aider --dry-run -- aider
-  jail-process.py -c confs/jail.yaml -p shell --rw ~/project --ro /opt/data -- bash
-  jail-process.py -c confs/jail.yaml -p shell --sandbox-exec -- bash
-  jail-process.py -c confs/jail.yaml -p shell --landlock -- bash
-  jail-process.py -c confs/jail.yaml -p shell --bwrap -- bash
+  jail-process.py -c confs/jail.toml -p claude -- claude --resume
+  jail-process.py -c confs/jail.toml -p aider --dry-run -- aider
+  jail-process.py -c confs/jail.toml -p shell --rw ~/project --ro /opt/data -- bash
+  jail-process.py -c confs/jail.toml -p shell --sandbox-exec -- bash
+  jail-process.py -c confs/jail.toml -p shell --landlock -- bash
+  jail-process.py -c confs/jail.toml -p shell --bwrap -- bash
 """
 
 import abc
@@ -46,7 +46,13 @@ import stat
 import sys
 from typing import NoReturn
 
-import yaml
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
 
 
 def die(msg) -> NoReturn:
@@ -63,13 +69,16 @@ def warn(msg):
 # ---------------------------------------------------------------------------
 
 def load_profile(config_path, profile_name):
-    """Load a named profile from the YAML config, with ~ expansion."""
+    """Load a named profile from the TOML config, with ~ expansion."""
+    if tomllib is None:
+        die("TOML support requires Python 3.11+ (stdlib tomllib) "
+            "or the 'tomli' package (pip install tomli)")
     try:
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
+        with open(config_path, "rb") as f:
+            config = tomllib.load(f)
     except FileNotFoundError:
         die(f"config file not found: {config_path}")
-    except yaml.YAMLError as e:
+    except tomllib.TOMLDecodeError as e:
         die(f"config file parse error: {e}")
 
     profiles = config.get("profiles") or die("config file has no 'profiles' key")
@@ -91,7 +100,8 @@ def _expand_paths(profile):
             profile[key] = [exp(p) for p in profile[key]]
 
     if "allowed_commands" in profile:
-        # YAML parses bare `true`/`false` as Python booleans; restore the command name
+        # TOML bare true/false are booleans; restore the command name if a
+        # boolean somehow ends up in the array (e.g. in a mixed-type array).
         profile["allowed_commands"] = [
             {True: "true", False: "false"}.get(cmd, str(cmd))
             for cmd in profile["allowed_commands"]
@@ -993,7 +1003,7 @@ def parse_args():
         usage="%(prog)s -c CONFIG -p PROFILE [--ro PATH] [--rw PATH] "
               "[--bwrap | --sandbox-exec | --landlock] [--dry-run] [--] COMMAND [ARGS...]",
     )
-    parser.add_argument("-c", "--config", required=True, help="Path to YAML config file")
+    parser.add_argument("-c", "--config", required=True, help="Path to TOML config file")
     parser.add_argument("-p", "--profile", required=True, help="Profile name to use")
     parser.add_argument("--ro", action="append", default=[], metavar="PATH",
                         help="Additional read-only path (repeatable)")
