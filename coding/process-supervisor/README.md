@@ -3,7 +3,7 @@
 Tools to monitor and sandbox processes on Linux and macOS. While primarily developed to supervise AI coding agents, all tools work with any process.
 
 - **Monitoring** — [bpftrace](https://github.com/bpftrace/bpftrace) scripts that trace what a process and all its descendants are doing (exec, file, network, suspicious ops) using kernel tracepoints, kprobes, and uprobes. Requires Linux with BTF support (`CONFIG_DEBUG_INFO_BTF=y`), bpftrace >= 0.21.
-- **Sandboxing** — a multi-backend jailing script that sandboxes processes with configurable filesystem, command, and network restrictions. Requires Python 3.6+ and PyYAML. Backend-specific requirements: [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`) on Linux, `sandbox-exec` on macOS (available by default), or Linux kernel 5.13+ for Landlock (no extra dependencies).
+- **Sandboxing** — a multi-backend jailing script that sandboxes processes with configurable filesystem, command, and network restrictions. Requires Python 3.11+ (or Python 3.6+ with the `tomli` package). Backend-specific requirements: [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`) on Linux, `sandbox-exec` on macOS (available by default), or Linux kernel 5.13+ for Landlock (no extra dependencies).
 
 Example configuration files for popular AI coding agents are provided in the `confs/` directory.
 
@@ -47,7 +47,7 @@ See `./monitor-process.sh -h` for all options.
 
 ### jail-process.py
 
-Sandboxes any process using one of three backends, selected automatically based on the platform or overridden with a flag. Uses YAML profiles to configure what the process can access.
+Sandboxes any process using one of three backends, selected automatically based on the platform or overridden with a flag. Uses TOML profiles to configure what the process can access.
 
 **Backends (mutually exclusive):**
 
@@ -70,24 +70,24 @@ Landlock and `sandbox-exec` enforce filesystem and exec restrictions but do not 
 
 ```
 # Dry-run — inspect what the sandbox would do (output depends on backend)
-./jail-process.py -c confs/jail.yaml -p claude --dry-run -- claude
+./jail-process.py -c confs/jail.toml -p claude --dry-run -- claude
 
 # Run a process inside the sandbox (auto-selects backend)
-./jail-process.py -c confs/jail.yaml -p claude -- claude
+./jail-process.py -c confs/jail.toml -p claude -- claude
 
 # Add extra mounts from the command line
-./jail-process.py -c confs/jail.yaml -p claude --rw ~/myproject --ro /opt/data -- claude
+./jail-process.py -c confs/jail.toml -p claude --rw ~/myproject --ro /opt/data -- claude
 
 # Explicitly select a backend
-./jail-process.py -c confs/jail.yaml -p claude --bwrap -- claude
-./jail-process.py -c confs/jail.yaml -p claude --landlock -- claude
-./jail-process.py -c confs/jail.yaml -p claude --sandbox-exec -- claude
+./jail-process.py -c confs/jail.toml -p claude --bwrap -- claude
+./jail-process.py -c confs/jail.toml -p claude --landlock -- claude
+./jail-process.py -c confs/jail.toml -p claude --sandbox-exec -- claude
 ```
 
 See `./jail-process.py -h` for all options.
 
 **Features:**
-- Profiles defined in YAML (`confs/jail.yaml`), one per process/agent
+- Profiles defined in TOML (`confs/jail.toml`), one per process/agent
 - `~` expansion in all path fields for portable configs
 - Automatic script dependency scanning — shell wrapper shebangs and `exec` targets are resolved and bound
 - Binaries are bound at all their paths (canonical, `which`, and realpath) so they work regardless of how they're referenced
@@ -160,7 +160,7 @@ Precedence: defaults < env vars < config file < CLI options.
 
 ## Sandbox profiles
 
-Pre-configured profiles for popular AI coding agents are provided in `confs/jail.yaml`. Any process can be jailed by adding a new profile to this file.
+Pre-configured profiles for popular AI coding agents are provided in `confs/jail.toml`. Any process can be jailed by adding a new profile to this file.
 
 | Profile | Tool | Agent state directory |
 |---|---|---|
