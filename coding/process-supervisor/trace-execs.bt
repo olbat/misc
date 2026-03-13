@@ -8,8 +8,6 @@
  * Usage: sudo bpftrace monitor_subprocesses.bt <PID>
  */
 
-config = { unstable_macro=enable; }
-
 // Timestamp: HH:MM:SS string and milliseconds within the current second
 macro ts_str(t) { strftime("%H:%M:%S", t) }
 macro ts_ms(t)  { (t % 1000000000) / 1000000 }
@@ -33,8 +31,8 @@ BEGIN
 // Track new processes: if the parent is watched, watch the child too
 tracepoint:sched:sched_process_fork
 {
-    if (@watched[args->parent_pid]) {
-        @watched[args->child_pid] = 1;
+    if (@watched[args.parent_pid]) {
+        @watched[args.child_pid] = 1;
     }
 }
 
@@ -43,8 +41,8 @@ tracepoint:syscalls:sys_enter_execve
 /(@watched[(int64)pid])/
 {
     $t = nsecs;
-    printf("%s.%03d      %-10s ", ts_str($t), ts_ms($t), "EXEC");
-    join(args->argv);
+    printf("%s.%03d      %-10s %s[%d] ", ts_str($t), ts_ms($t), "EXEC", comm, pid);
+    join(args.argv);
 }
 
 // Stop watching processes that have exited (only when main thread exits)

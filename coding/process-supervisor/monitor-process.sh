@@ -237,11 +237,11 @@ else
 fi
 
 # --- Attach bpftrace scripts (elevated) ---
-# Each bpftrace is wrapped with stdbuf -oL to force line-buffered
-# output. This ensures lines are flushed to the log file promptly and
-# that concurrent writers don't interleave partial lines (each line
-# write is a single write() call, well under the PIPE_BUF atomic
-# guarantee of 4096 bytes on Linux).
+# bpftrace -B line forces line-buffered output (including to files,
+# since v0.25). This ensures lines are flushed to the log file
+# promptly and that concurrent writers don't interleave partial lines
+# (each line write is a single write() call, well under the PIPE_BUF
+# atomic guarantee of 4096 bytes on Linux).
 #
 # When outputting to stdout, we open fd 3 as a copy of stdout so that
 # backgrounded processes can write to it reliably.
@@ -254,30 +254,30 @@ fi
 
 if [[ "$TRACE_EXECS" -eq 1 ]]; then
     echo "[monitor-process] Attaching exec tracer..."
-    sudo stdbuf -oL bpftrace "$SCRIPT_DIR/trace-execs.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
+    sudo bpftrace -B line "$SCRIPT_DIR/trace-execs.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
     BPFTRACE_PIDS+=($!)
 fi
 
 if [[ "$TRACE_FILES" -eq 1 ]]; then
     echo "[monitor-process] Attaching file tracer..."
     if [[ -n "$FILE_FILTER" ]]; then
-        sudo stdbuf -oL bpftrace "$SCRIPT_DIR/trace-files.bt" "$TARGET_PID" 2>&1 \
-            | stdbuf -oL grep --line-buffered -vE "$FILE_FILTER" >> "$OUT_REDIR" &
+        sudo bpftrace -B line "$SCRIPT_DIR/trace-files.bt" "$TARGET_PID" 2>&1 \
+            | grep --line-buffered -vE "$FILE_FILTER" >> "$OUT_REDIR" &
     else
-        sudo stdbuf -oL bpftrace "$SCRIPT_DIR/trace-files.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
+        sudo bpftrace -B line "$SCRIPT_DIR/trace-files.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
     fi
     BPFTRACE_PIDS+=($!)
 fi
 
 if [[ "$TRACE_NETCALLS" -eq 1 ]]; then
     echo "[monitor-process] Attaching network tracer..."
-    sudo stdbuf -oL bpftrace "$SCRIPT_DIR/trace-netcalls.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
+    sudo bpftrace -B line "$SCRIPT_DIR/trace-netcalls.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
     BPFTRACE_PIDS+=($!)
 fi
 
 if [[ "$TRACE_SUSPICIOUS" -eq 1 ]]; then
     echo "[monitor-process] Attaching suspicious ops tracer..."
-    sudo stdbuf -oL bpftrace "$SCRIPT_DIR/trace-suspicious.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
+    sudo bpftrace -B line "$SCRIPT_DIR/trace-suspicious.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
     BPFTRACE_PIDS+=($!)
 fi
 
