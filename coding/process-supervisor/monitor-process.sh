@@ -2,8 +2,10 @@
 #
 # monitor-process.sh
 #
-# Attaches bpftrace scripts (execs, files, netcalls, suspicious) with
-# elevated privileges to monitor a process and all its descendants.
+# Builds a combined bpftrace script from trace-common.bt and the enabled
+# tracer modules (execs, files, netcalls, suspicious), then runs a single
+# bpftrace process with elevated privileges to monitor a process and all
+# its descendants.
 #
 # Two modes:
 #   Run mode:    Launch a command and trace it (default)
@@ -29,7 +31,7 @@
 #   -p, --pid PID              Attach to an existing process instead of
 #                              launching a new one
 #   -o, --output FILE          Write traces to FILE (default: temp file)
-#   -f, --filter REGEX         Exclude file-tracer lines matching REGEX
+#   -f, --filter REGEX         Exclude output lines matching REGEX
 #                              (grep -vE; see monitor-claude.conf for an example)
 #       --no-filter            Disable the exclusion filter
 #   -E, --disable-execs        Disable subprocess/exec tracing
@@ -80,7 +82,7 @@ Options:
   -p, --pid PID              Attach to an existing process instead of
                              launching a new one
   -o, --output FILE          Write traces to FILE (default: temp file)
-  -f, --filter REGEX         Exclude file-tracer lines matching REGEX
+  -f, --filter REGEX         Exclude output lines matching REGEX
                              (grep -vE; see monitor-claude.conf for an example)
       --no-filter            Disable the exclusion filter
   -E, --disable-execs        Disable subprocess/exec tracing
@@ -126,7 +128,7 @@ eval set -- "$OPTS"
 
 while true; do
     case "$1" in
-        -c|--config)             source "$2";          shift 2 ;;
+        -c|--config)             source "$2";         shift 2 ;;
         -p|--pid)                ATTACH_PID="$2";     shift 2 ;;
         -o|--output)             LOG_FILE="$2";       shift 2 ;;
         -f|--filter)             FILE_FILTER="$2";    shift 2 ;;
@@ -151,6 +153,73 @@ if [[ -z "$ATTACH_PID" && $# -eq 0 ]]; then
     usage
 fi
 
+# --- Build combined bpftrace script ---
+# Concatenate trace-common.bt (shared preamble) with enabled tracer
+# modules, then append a shared postamble for process-exit cleanup.
+# Tracer-specific exit handlers (e.g. netcalls flush_agg) are placed
+# before the shared handler so they fire first.
+TRACERS_ENABLED=0
+COMBINED_SCRIPT=$(mktemp "/tmp/monitor-combined.XXXXXX.bt")
+
+cat "$SCRIPT_DIR/trace-common.bt" >> "$COMBINED_SCRIPT"
+
+if [[ "$TRACE_EXECS" -eq 1 ]]; then
+    echo "[monitor-process] Including exec tracer"
+    cat "$SCRIPT_DIR/trace-execs.bt" >> "$COMBINED_SCRIPT"
+    ((TRACERS_ENABLED++)) || true
+fi
+
+if [[ "$TRACE_FILES" -eq 1 ]]; then
+    echo "[monitor-process] Including file tracer"
+    cat "$SCRIPT_DIR/trace-files.bt" >> "$COMBINED_SCRIPT"
+    ((TRACERS_ENABLED++)) || true
+fi
+
+if [[ "$TRACE_NETCALLS" -eq 1 ]]; then
+    echo "[monitor-process] Including network tracer"
+    cat "$SCRIPT_DIR/trace-netcalls.bt" >> "$COMBINED_SCRIPT"
+    ((TRACERS_ENABLED++)) || true
+fi
+
+if [[ "$TRACE_SUSPICIOUS" -eq 1 ]]; then
+    echo "[monitor-process] Including suspicious ops tracer"
+    cat "$SCRIPT_DIR/trace-suspicious.bt" >> "$COMBINED_SCRIPT"
+    ((TRACERS_ENABLED++)) || true
+fi
+
+if [[ "$TRACERS_ENABLED" -eq 0 ]]; then
+    echo "[monitor-process] All tracers disabled, nothing to do." >&2
+    rm -f "$COMBINED_SCRIPT"
+    exit 1
+fi
+
+# Append shared postamble: process-exit cleanup and root-exit handler.
+# This must come AFTER all tracer modules so that tracer-specific exit
+# handlers (e.g. netcalls flush_agg) fire before @watched is cleaned up.
+cat >> "$COMBINED_SCRIPT" << 'POSTAMBLE'
+
+// --- Shared process tracking (appended by monitor-process.sh) ---
+
+tracepoint:sched:sched_process_exit
+/(@watched[(int64)pid]) && tid == pid/
+{
+    $_ = delete(@watched[(int64)pid]);
+}
+
+tracepoint:sched:sched_process_exit
+/(tid == (uint64)@root_pid)/
+{
+    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
+    exit();
+}
+
+END
+{
+    clear(@watched);
+    $_ = delete(@root_pid);
+}
+POSTAMBLE
+
 # --- Output setup ---
 # In attach mode, default to stdout (no interleaving risk since we
 # didn't launch the process). In run mode, default to a temp file.
@@ -173,7 +242,7 @@ echo "[monitor-process] bpftrace requires root — requesting sudo credentials..
 sudo -v
 
 # --- Child PID tracking ---
-BPFTRACE_PIDS=()
+BPFTRACE_PID=""
 TARGET_PID=""
 TARGET_OWNED=0
 CLEANING_UP=0
@@ -187,11 +256,10 @@ cleanup() {
     echo ""
     echo "[monitor-process] Cleaning up..."
 
-    # Tracked PIDs may be root-owned (bpftrace/sudo) or user-owned
-    # (grep, when filtering is active). Try both; one will succeed.
-    for child_pid in "${BPFTRACE_PIDS[@]}"; do
-        kill "$child_pid" 2>/dev/null || sudo kill "$child_pid" 2>/dev/null || true
-    done
+    # Kill the bpftrace process (root-owned via sudo) and any filter pipe
+    if [[ -n "$BPFTRACE_PID" ]]; then
+        kill "$BPFTRACE_PID" 2>/dev/null || sudo kill "$BPFTRACE_PID" 2>/dev/null || true
+    fi
 
     # We never kill the target — we only trace, we don't own its lifecycle.
     if [[ -n "$TARGET_PID" ]] && kill -0 "$TARGET_PID" 2>/dev/null; then
@@ -199,6 +267,7 @@ cleanup() {
     fi
 
     wait 2>/dev/null || true
+    rm -f "$COMBINED_SCRIPT"
     if [[ "$LOG_TO_STDOUT" -eq 0 ]]; then
         echo "[monitor-process] Traces saved to: $LOG_FILE"
     fi
@@ -236,15 +305,9 @@ else
     fi
 fi
 
-# --- Attach bpftrace scripts (elevated) ---
+# --- Run single combined bpftrace (elevated) ---
 # bpftrace -B line forces line-buffered output (including to files,
-# since v0.25). This ensures lines are flushed to the log file
-# promptly and that concurrent writers don't interleave partial lines
-# (each line write is a single write() call, well under the PIPE_BUF
-# atomic guarantee of 4096 bytes on Linux).
-#
-# When outputting to stdout, we open fd 3 as a copy of stdout so that
-# backgrounded processes can write to it reliably.
+# since v0.25). When a FILE_FILTER is active, pipe through grep.
 if [[ "$LOG_TO_STDOUT" -eq 1 ]]; then
     exec 3>&1
     OUT_REDIR="/dev/fd/3"
@@ -252,41 +315,15 @@ else
     OUT_REDIR="$LOG_FILE"
 fi
 
-if [[ "$TRACE_EXECS" -eq 1 ]]; then
-    echo "[monitor-process] Attaching exec tracer..."
-    sudo bpftrace -B line "$SCRIPT_DIR/trace-execs.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
-    BPFTRACE_PIDS+=($!)
+echo "[monitor-process] Starting bpftrace with $TRACERS_ENABLED tracer(s)..."
+if [[ -n "$FILE_FILTER" ]]; then
+    sudo bpftrace -B line "$COMBINED_SCRIPT" "$TARGET_PID" 2>&1 \
+        | grep --line-buffered -vE "$FILE_FILTER" >> "$OUT_REDIR" &
+else
+    sudo bpftrace -B line "$COMBINED_SCRIPT" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
 fi
+BPFTRACE_PID=$!
 
-if [[ "$TRACE_FILES" -eq 1 ]]; then
-    echo "[monitor-process] Attaching file tracer..."
-    if [[ -n "$FILE_FILTER" ]]; then
-        sudo bpftrace -B line "$SCRIPT_DIR/trace-files.bt" "$TARGET_PID" 2>&1 \
-            | grep --line-buffered -vE "$FILE_FILTER" >> "$OUT_REDIR" &
-    else
-        sudo bpftrace -B line "$SCRIPT_DIR/trace-files.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
-    fi
-    BPFTRACE_PIDS+=($!)
-fi
-
-if [[ "$TRACE_NETCALLS" -eq 1 ]]; then
-    echo "[monitor-process] Attaching network tracer..."
-    sudo bpftrace -B line "$SCRIPT_DIR/trace-netcalls.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
-    BPFTRACE_PIDS+=($!)
-fi
-
-if [[ "$TRACE_SUSPICIOUS" -eq 1 ]]; then
-    echo "[monitor-process] Attaching suspicious ops tracer..."
-    sudo bpftrace -B line "$SCRIPT_DIR/trace-suspicious.bt" "$TARGET_PID" >> "$OUT_REDIR" 2>&1 &
-    BPFTRACE_PIDS+=($!)
-fi
-
-if [[ ${#BPFTRACE_PIDS[@]} -eq 0 ]]; then
-    echo "[monitor-process] All tracers disabled, nothing to do." >&2
-    exit 1
-fi
-
-echo "[monitor-process] ${#BPFTRACE_PIDS[@]} tracer(s) attached."
 if [[ "$LOG_TO_STDOUT" -eq 0 ]]; then
     echo "[monitor-process] Traces: $LOG_FILE"
     echo "[monitor-process] Follow live with: tail -f $LOG_FILE"

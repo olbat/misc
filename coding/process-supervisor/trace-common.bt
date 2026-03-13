@@ -1,0 +1,41 @@
+/*
+ * trace-common.bt
+ *
+ * Shared preamble for process monitoring scripts. Provides timestamp
+ * macros, process-tree tracking, and lifecycle management.
+ *
+ * Not intended to be run standalone. Combined with tracer modules by
+ * monitor-process.sh (or manually via cat):
+ *
+ *   cat trace-common.bt trace-files.bt | sudo bpftrace - <PID>
+ *
+ * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.25
+ */
+
+// Timestamp: HH:MM:SS string and milliseconds within the current second
+macro ts_str(t) { strftime("%H:%M:%S", t) }
+macro ts_ms(t)  { (t % 1000000000) / 1000000 }
+
+// Network to host byte order for 16-bit values
+macro ntohs(raw) { ((raw >> 8) | ((raw & 0xff) << 8)) }
+
+BEGIN
+{
+    if ($1 == 0) {
+        printf("Usage: sudo bpftrace <script> <PID>\n");
+        exit();
+    }
+    printf("Monitoring PID %d (and their children)...\n", $1);
+    printf("%-20s %-10s %s\n", "TIME", "EVENT", "DETAILS");
+    printf("%-20s %-10s %s\n", "----", "-----", "-------");
+
+    @root_pid = $1;
+    @watched[($1)] = 1;
+}
+
+tracepoint:sched:sched_process_fork
+{
+    if (@watched[(int64)pid]) {
+        @watched[args.child_pid] = 1;
+    }
+}

@@ -1,9 +1,8 @@
-#!/usr/bin/env bpftrace
 /*
- * trace-netcalls.bt
+ * trace-netcalls.bt — Network tracer module
  *
  * Monitor outbound network calls (TCP connect, DNS lookups, data transfer)
- * made by a specific process and its descendants.
+ * made by the watched process tree.
  *
  * Consecutive TCP send/receive events for the same connection are aggregated
  * into a single line showing total bytes and call count.
@@ -12,18 +11,11 @@
  * user-space pointer reads that silently fail on kernel 5.5+
  * (bpf_probe_read vs bpf_probe_read_user).
  *
- * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.25
- * Usage: sudo bpftrace trace-netcalls.bt <PID>
+ * Requires trace-common.bt preamble:
+ *   cat trace-common.bt trace-netcalls.bt | sudo bpftrace - <PID>
  */
 
 // --- Macros ---
-
-// Timestamp: HH:MM:SS string and milliseconds within the current second
-macro ts_str(t) { strftime("%H:%M:%S", t) }
-macro ts_ms(t)  { (t % 1000000000) / 1000000 }
-
-// Network to host byte order for 16-bit values
-macro ntohs(raw) { ((raw >> 8) | ((raw & 0xff) << 8)) }
 
 // Print a TCP event using sock struct fields (IPv6 only, IPv4 uses aggregation).
 macro log_sock_event_v6($sk, event, size, $t) {
@@ -130,27 +122,6 @@ macro log_udp6($sk, $msg, size, $t) {
 }
 
 // --- Probes ---
-
-BEGIN
-{
-    if ($1 == 0) {
-        printf("Usage: sudo bpftrace trace-netcalls.bt <PID>\n");
-        exit();
-    }
-    printf("Monitoring network calls of PID %d (and their children)...\n", $1);
-    printf("%-20s %-10s %s\n", "TIME", "EVENT", "DETAILS");
-    printf("%-20s %-10s %s\n", "----", "-----", "-------");
-
-    @root_pid = $1;
-    @watched[($1)] = 1;
-}
-
-tracepoint:sched:sched_process_fork
-{
-    if (@watched[(int64)pid]) {
-        @watched[args.child_pid] = 1;
-    }
-}
 
 /*
  * Hostname resolution — uprobe on libc's getaddrinfo.
@@ -317,26 +288,15 @@ kprobe:udpv6_sendmsg
     log_udp6($sk, $msg, (uint64)arg2, $t);
 }
 
-// Stop watching processes that have exited (only when main thread exits)
+// Flush pending aggregation when a watched process exits
 tracepoint:sched:sched_process_exit
 /(@watched[(int64)pid]) && tid == pid/
 {
-    // Flush pending aggregation for this process
     flush_agg(@agg_count, @agg_type, @agg_time, @agg_ip, @agg_dport, @host_by_ip, @agg_bytes);
-    delete(@watched[(int64)pid]);
-}
-
-// Exit when the root process's main thread exits
-tracepoint:sched:sched_process_exit
-/(tid == (uint64)@root_pid)/
-{
-    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
-    exit();
 }
 
 END
 {
-    clear(@watched);
     clear(@ip_to_host);
     clear(@host_by_ip);
     clear(@resolve_host);
@@ -347,5 +307,4 @@ END
     clear(@agg_bytes);
     clear(@agg_count);
     clear(@agg_time);
-    delete(@root_pid);
 }

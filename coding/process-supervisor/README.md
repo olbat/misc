@@ -2,7 +2,7 @@
 
 Tools to monitor and sandbox processes on Linux and macOS. While primarily developed to supervise AI coding agents, all tools work with any process.
 
-- **Monitoring** — [bpftrace](https://github.com/bpftrace/bpftrace) scripts that trace what a process and all its descendants are doing (exec, file, network, suspicious ops) using kernel tracepoints, kprobes, and uprobes. Requires Linux with BTF support (`CONFIG_DEBUG_INFO_BTF=y`), bpftrace >= 0.21.
+- **Monitoring** — [bpftrace](https://github.com/bpftrace/bpftrace) scripts that trace what a process and all its descendants are doing (exec, file, network, suspicious ops) using kernel tracepoints, kprobes, and uprobes. Requires Linux with BTF support (`CONFIG_DEBUG_INFO_BTF=y`), bpftrace >= 0.25 (see [8aacaf8](https://github.com/olbat/misc/tree/8aacaf8099f695bdf4c0b40f80040cf26c0f9bdd) for bpftrace < 0.25).
 - **Sandboxing** — a multi-backend jailing script that sandboxes processes with configurable filesystem, command, and network restrictions. Requires Python 3.11+ (or Python 3.6+ with the `tomli` package). Backend-specific requirements: [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`) on Linux, `sandbox-exec` on macOS (available by default), or Linux kernel 5.13+ for Landlock (no extra dependencies).
 
 Example configuration files for popular AI coding agents are provided in the `confs/` directory.
