@@ -1,56 +1,27 @@
-#!/usr/bin/env bpftrace
 /*
- * trace-files.bt
+ * trace-files.bt — File operation tracer module
  *
- * Monitor file operations (open, read, write, mkdir, delete, rename) made by a
- * specific process and its descendants.
+ * Monitor file operations (open, read, write, mkdir, delete, rename,
+ * chmod, chown) made by the watched process tree.
  *
- * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
- * Usage: sudo bpftrace trace-files.bt <PID>
+ * Requires trace-common.bt preamble:
+ *   cat trace-common.bt trace-files.bt | sudo bpftrace - <PID>
  */
-
-config = { unstable_macro=enable; }
-
-// Timestamp: HH:MM:SS string and milliseconds within the current second
-macro ts_str(t) { strftime("%H:%M:%S", t) }
-macro ts_ms(t)  { (t % 1000000000) / 1000000 }
-
-BEGIN
-{
-    if ($1 == 0) {
-        printf("Usage: sudo bpftrace trace-files.bt <PID>\n");
-        exit();
-    }
-    printf("Monitoring file operations of PID %d (and their children)...\n", $1);
-    printf("%-20s %-10s %s\n", "TIME", "EVENT", "DETAILS");
-    printf("%-20s %-10s %s\n", "----", "-----", "-------");
-
-    @root_pid = $1;
-    @watched[($1)] = 1;
-}
-
-tracepoint:sched:sched_process_fork
-{
-    if (@watched[(int64)pid]) {
-        @watched[args->child_pid] = 1;
-    }
-}
 
 // --- File open ---
 // Save filename and flags at entry, complete at exit when we have the fd.
 tracepoint:syscalls:sys_enter_openat
 /@watched[(int64)pid]/
 {
-    @open_path[tid] = str(args->filename);
-    @open_flags[tid] = args->flags;
+    @fil_open[tid] = (path=str(args.filename), flags=args.flags);
 }
 
 tracepoint:syscalls:sys_exit_openat
-/@open_path[tid] != ""/
+/@fil_open[tid].path != ""/
 {
     $t = nsecs;
-    $flags = @open_flags[tid];
-    $path = @open_path[tid];
+    $flags = @fil_open[tid].flags;
+    $path = @fil_open[tid].path;
 
     if ($flags & 0x40) {
         // O_CREAT
@@ -64,40 +35,39 @@ tracepoint:syscalls:sys_exit_openat
     }
 
     // Map fd to path for subsequent read/write tracking
-    if (args->ret >= 0) {
-        @fd_to_path[pid, args->ret] = $path;
+    if (args.ret >= 0) {
+        @fd_to_path[pid, args.ret] = $path;
     }
 
-    delete(@open_path[tid]);
-    delete(@open_flags[tid]);
+    $_ = delete(@fil_open[tid]);
 }
 
 // --- File read/write ---
 
 tracepoint:syscalls:sys_enter_read
-/@watched[(int64)pid] && @fd_to_path[pid, (int64)args->fd] != ""/
+/@watched[(int64)pid] && @fd_to_path[pid, (int64)args.fd] != ""/
 {
     $t = nsecs;
     printf("%s.%03d      %-10s %s (%d bytes)\n",
         ts_str($t), ts_ms($t), "READ",
-        @fd_to_path[pid, (int64)args->fd], args->count);
+        @fd_to_path[pid, (int64)args.fd], args.count);
 }
 
 tracepoint:syscalls:sys_enter_write
-/@watched[(int64)pid] && @fd_to_path[pid, (int64)args->fd] != ""/
+/@watched[(int64)pid] && @fd_to_path[pid, (int64)args.fd] != ""/
 {
     $t = nsecs;
     printf("%s.%03d      %-10s %s (%d bytes)\n",
         ts_str($t), ts_ms($t), "WRITE",
-        @fd_to_path[pid, (int64)args->fd], args->count);
+        @fd_to_path[pid, (int64)args.fd], args.count);
 }
 
 // --- File close (cleanup fd mapping) ---
 
 tracepoint:syscalls:sys_enter_close
-/@watched[(int64)pid] && @fd_to_path[pid, (int64)args->fd] != ""/
+/@watched[(int64)pid] && @fd_to_path[pid, (int64)args.fd] != ""/
 {
-    delete(@fd_to_path[pid, (int64)args->fd]);
+    $_ = delete(@fd_to_path[pid, (int64)args.fd]);
 }
 
 // --- Directory create ---
@@ -108,7 +78,7 @@ tracepoint:syscalls:sys_enter_mkdirat
     $t = nsecs;
     printf("%s.%03d      %-10s %s (mode %o)\n",
         ts_str($t), ts_ms($t), "MKDIR",
-        str(args->pathname), args->mode);
+        str(args.pathname), args.mode);
 }
 
 // --- File delete ---
@@ -118,7 +88,7 @@ tracepoint:syscalls:sys_enter_unlinkat
 {
     $t = nsecs;
     printf("%s.%03d      %-10s %s\n",
-        ts_str($t), ts_ms($t), "DELETE", str(args->pathname));
+        ts_str($t), ts_ms($t), "DELETE", str(args.pathname));
 }
 
 // --- File rename ---
@@ -129,7 +99,7 @@ tracepoint:syscalls:sys_enter_renameat2
     $t = nsecs;
     printf("%s.%03d      %-10s %s -> %s\n",
         ts_str($t), ts_ms($t), "RENAME",
-        str(args->oldname), str(args->newname));
+        str(args.oldname), str(args.newname));
 }
 
 // --- File chmod ---
@@ -140,7 +110,7 @@ tracepoint:syscalls:sys_enter_fchmodat
     $t = nsecs;
     printf("%s.%03d      %-10s %s (mode %o)\n",
         ts_str($t), ts_ms($t), "CHMOD",
-        str(args->filename), args->mode);
+        str(args.filename), args.mode);
 }
 
 // --- File chown ---
@@ -151,31 +121,11 @@ tracepoint:syscalls:sys_enter_fchownat
     $t = nsecs;
     printf("%s.%03d      %-10s %s (uid %d, gid %d)\n",
         ts_str($t), ts_ms($t), "CHOWN",
-        str(args->filename), args->user, args->group);
-}
-
-// --- Process tracking ---
-
-// Stop watching processes that have exited (only when main thread exits)
-tracepoint:sched:sched_process_exit
-/(@watched[(int64)pid]) && tid == pid/
-{
-    delete(@watched[(int64)pid]);
-}
-
-// Exit when the root process's main thread exits
-tracepoint:sched:sched_process_exit
-/(tid == (uint64)@root_pid)/
-{
-    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
-    exit();
+        str(args.filename), args.user, args.group);
 }
 
 END
 {
-    clear(@watched);
     clear(@fd_to_path);
-    clear(@open_path);
-    clear(@open_flags);
-    delete(@root_pid);
+    clear(@fil_open);
 }

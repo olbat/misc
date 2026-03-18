@@ -1,10 +1,9 @@
-#!/usr/bin/env bpftrace
 /*
- * trace-suspicious.bt
+ * trace-suspicious.bt — Suspicious operation tracer module
  *
- * Monitor suspicious or potentially abusive operations performed by a
- * process and its descendants. Designed to catch processes performing
- * suspicious or potentially dangerous operations.
+ * Monitor suspicious or potentially abusive operations performed by the
+ * watched process tree. Designed to catch processes performing suspicious
+ * or potentially dangerous operations.
  *
  * Categories of suspicious activity:
  *   - Credential/secret access (reading SSH keys, tokens, .env files)
@@ -22,36 +21,9 @@
  *   - Destructive actions (reboot, kill outside watched tree)
  *   - Permission manipulation (setting setuid/setgid bits)
  *
- * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
- * Usage: sudo bpftrace trace-suspicious.bt <PID>
+ * Requires trace-common.bt preamble:
+ *   cat trace-common.bt trace-suspicious.bt | sudo bpftrace - <PID>
  */
-
-config = { unstable_macro=enable; }
-
-// Timestamp: HH:MM:SS string and milliseconds within the current second
-macro ts_str(t) { strftime("%H:%M:%S", t) }
-macro ts_ms(t)  { (t % 1000000000) / 1000000 }
-
-BEGIN
-{
-    if ($1 == 0) {
-        printf("Usage: sudo bpftrace trace-suspicious.bt <PID>\n");
-        exit();
-    }
-    printf("Monitoring suspicious operations of PID %d (and their children)...\n", $1);
-    printf("%-20s %-10s %s\n", "TIME", "EVENT", "DETAILS");
-    printf("%-20s %-10s %s\n", "----", "-----", "-------");
-
-    @root_pid = $1;
-    @watched[($1)] = 1;
-}
-
-tracepoint:sched:sched_process_fork
-{
-    if (@watched[(int64)pid]) {
-        @watched[args->child_pid] = 1;
-    }
-}
 
 // ========================================================================
 // Credential / secret access
@@ -65,17 +37,17 @@ tracepoint:sched:sched_process_fork
 tracepoint:syscalls:sys_enter_openat
 /@watched[(int64)pid]/
 {
-    @open_path[tid] = str(args->filename, 64);
-    @open_write[tid] = (args->flags & 3) > 0 || (args->flags & 0x40) ? 1 : 0;
+    @sus_open[tid] = (path=str(args.filename, 64),
+                       write=(args.flags & 3) > 0 || (args.flags & 0x40) ? 1 : 0);
 }
 
 // --- Credential / secret files (1/2) ---
 // SSH keys, GPG keyrings, cloud credentials, GitHub CLI tokens.
 // The traced process has no business reading these.
 tracepoint:syscalls:sys_exit_openat
-/@open_path[tid] != ""/
+/@sus_open[tid].path != ""/
 {
-    $path = @open_path[tid];
+    $path = @sus_open[tid].path;
     if (strcontains($path, ".ssh/") ||
         strcontains($path, ".gnupg/") ||
         strcontains($path, ".docker/") ||
@@ -83,7 +55,7 @@ tracepoint:syscalls:sys_exit_openat
         strcontains($path, ".aws/") ||
         strcontains($path, ".azure/")) {
         $t = nsecs;
-        $mode = @open_write[tid] ? "W" : "R";
+        $mode = @sus_open[tid].write ? "W" : "R";
         printf("%s.%03d      !SECRET[%s] %s\n",
             ts_str($t), ts_ms($t), $mode, $path);
     }
@@ -92,16 +64,16 @@ tracepoint:syscalls:sys_exit_openat
 // --- Credential / secret files (2/2) ---
 // .env files, token/secret/credential files, .netrc, /etc/shadow.
 tracepoint:syscalls:sys_exit_openat
-/@open_path[tid] != ""/
+/@sus_open[tid].path != ""/
 {
-    $path = @open_path[tid];
+    $path = @sus_open[tid].path;
     if (strcontains($path, ".env") ||
         strcontains($path, "token") ||
         strcontains($path, "secret") ||
         strcontains($path, ".netrc") ||
         strcontains($path, "/etc/shadow")) {
         $t = nsecs;
-        $mode = @open_write[tid] ? "W" : "R";
+        $mode = @sus_open[tid].write ? "W" : "R";
         printf("%s.%03d      !SECRET[%s] %s\n",
             ts_str($t), ts_ms($t), $mode, $path);
     }
@@ -111,9 +83,9 @@ tracepoint:syscalls:sys_exit_openat
 // Writing to cron or systemd directories installs commands that persist
 // and run after the process exits.
 tracepoint:syscalls:sys_exit_openat
-/@open_write[tid]/
+/@sus_open[tid].write/
 {
-    $path = @open_path[tid];
+    $path = @sus_open[tid].path;
     if (strcontains($path, "/etc/cron") ||
         strcontains($path, "/spool/cron/") ||
         strcontains($path, "/etc/systemd/") ||
@@ -129,9 +101,9 @@ tracepoint:syscalls:sys_exit_openat
 // Modifying .bashrc, .zshrc, .profile etc. lets a process inject commands
 // that run every time the user opens a shell.
 tracepoint:syscalls:sys_exit_openat
-/@open_write[tid]/
+/@sus_open[tid].write/
 {
-    $path = @open_path[tid];
+    $path = @sus_open[tid].path;
     if (strcontains($path, ".profile") ||
         strcontains($path, ".bashrc") ||
         strcontains($path, ".bash_profile") ||
@@ -142,8 +114,7 @@ tracepoint:syscalls:sys_exit_openat
             ts_str($t), ts_ms($t), "!SHRC_W", $path);
     }
 
-    delete(@open_path[tid]);
-    delete(@open_write[tid]);
+    $_ = delete(@sus_open[tid]);
 }
 
 // ========================================================================
@@ -159,7 +130,7 @@ tracepoint:syscalls:sys_enter_setuid
 {
     $t = nsecs;
     printf("%s.%03d      %-10s uid=%d\n",
-        ts_str($t), ts_ms($t), "!SETUID", args->uid);
+        ts_str($t), ts_ms($t), "!SETUID", args.uid);
 }
 
 tracepoint:syscalls:sys_enter_setgid
@@ -167,7 +138,7 @@ tracepoint:syscalls:sys_enter_setgid
 {
     $t = nsecs;
     printf("%s.%03d      %-10s gid=%d\n",
-        ts_str($t), ts_ms($t), "!SETGID", args->gid);
+        ts_str($t), ts_ms($t), "!SETGID", args.gid);
 }
 
 // setresuid / setresgid — set real, effective, and saved user/group IDs.
@@ -178,7 +149,7 @@ tracepoint:syscalls:sys_enter_setresuid
     $t = nsecs;
     printf("%s.%03d      %-10s ruid=%d euid=%d suid=%d\n",
         ts_str($t), ts_ms($t), "!SETRESUID",
-        args->ruid, args->euid, args->suid);
+        args.ruid, args.euid, args.suid);
 }
 
 tracepoint:syscalls:sys_enter_setresgid
@@ -187,7 +158,7 @@ tracepoint:syscalls:sys_enter_setresgid
     $t = nsecs;
     printf("%s.%03d      %-10s rgid=%d egid=%d sgid=%d\n",
         ts_str($t), ts_ms($t), "!SETRESGID",
-        args->rgid, args->egid, args->sgid);
+        args.rgid, args.egid, args.sgid);
 }
 
 // capset — modify process capabilities (e.g. granting CAP_NET_RAW,
@@ -212,7 +183,7 @@ tracepoint:syscalls:sys_enter_ptrace
 {
     $t = nsecs;
     printf("%s.%03d      %-10s request=%ld target_pid=%ld\n",
-        ts_str($t), ts_ms($t), "!PTRACE", args->request, args->pid);
+        ts_str($t), ts_ms($t), "!PTRACE", args.request, args.pid);
 }
 
 // mount / umount — mounting filesystems can be used to overlay system
@@ -223,7 +194,7 @@ tracepoint:syscalls:sys_enter_mount
     $t = nsecs;
     printf("%s.%03d      %-10s %s on %s type %s\n",
         ts_str($t), ts_ms($t), "!MOUNT",
-        str(args->dev_name), str(args->dir_name), str(args->type));
+        str(args.dev_name), str(args.dir_name), str(args.type));
 }
 
 tracepoint:syscalls:sys_enter_umount
@@ -231,7 +202,7 @@ tracepoint:syscalls:sys_enter_umount
 {
     $t = nsecs;
     printf("%s.%03d      %-10s %s\n",
-        ts_str($t), ts_ms($t), "!UMOUNT", str(args->name));
+        ts_str($t), ts_ms($t), "!UMOUNT", str(args.name));
 }
 
 // init_module / finit_module — loading kernel modules gives full kernel
@@ -241,7 +212,7 @@ tracepoint:syscalls:sys_enter_init_module
 {
     $t = nsecs;
     printf("%s.%03d      %-10s size=%lu\n",
-        ts_str($t), ts_ms($t), "!KMOD", args->len);
+        ts_str($t), ts_ms($t), "!KMOD", args.len);
 }
 
 tracepoint:syscalls:sys_enter_finit_module
@@ -249,7 +220,7 @@ tracepoint:syscalls:sys_enter_finit_module
 {
     $t = nsecs;
     printf("%s.%03d      %-10s fd=%d\n",
-        ts_str($t), ts_ms($t), "!KMOD", args->fd);
+        ts_str($t), ts_ms($t), "!KMOD", args.fd);
 }
 
 // sethostname / setdomainname — changing the system's identity is not
@@ -259,7 +230,7 @@ tracepoint:syscalls:sys_enter_sethostname
 {
     $t = nsecs;
     printf("%s.%03d      %-10s %s\n",
-        ts_str($t), ts_ms($t), "!SETHOST", str(args->name));
+        ts_str($t), ts_ms($t), "!SETHOST", str(args.name));
 }
 
 tracepoint:syscalls:sys_enter_setdomainname
@@ -267,7 +238,7 @@ tracepoint:syscalls:sys_enter_setdomainname
 {
     $t = nsecs;
     printf("%s.%03d      %-10s %s\n",
-        ts_str($t), ts_ms($t), "!SETDOM", str(args->name));
+        ts_str($t), ts_ms($t), "!SETDOM", str(args.name));
 }
 
 // ========================================================================
@@ -283,18 +254,18 @@ tracepoint:syscalls:sys_enter_memfd_create
     $t = nsecs;
     printf("%s.%03d      %-10s name=%s flags=0x%x\n",
         ts_str($t), ts_ms($t), "!MEMFD",
-        str(args->uname), args->flags);
+        str(args.uname), args.flags);
 }
 
 // socket with SOCK_RAW (type 3) — raw sockets allow crafting arbitrary
 // network packets, used for network scanning, spoofing, or covert channels.
 tracepoint:syscalls:sys_enter_socket
-/@watched[(int64)pid] && args->type == 3/
+/@watched[(int64)pid] && args.type == 3/
 {
     $t = nsecs;
     printf("%s.%03d      %-10s family=%d protocol=%d\n",
         ts_str($t), ts_ms($t), "!RAW_SOCK",
-        args->family, args->protocol);
+        args.family, args.protocol);
 }
 
 // ========================================================================
@@ -307,29 +278,28 @@ tracepoint:syscalls:sys_enter_socket
 // Parse the sockaddr to show what address/port is being bound.
 // Skip AF_NETLINK (16) — normal kernel-userspace IPC, not a network concern.
 tracepoint:syscalls:sys_enter_bind
-/@watched[(int64)pid] && *(uint16 *)args->umyaddr != 16/
+/@watched[(int64)pid] && *(uint16 *)args.umyaddr != 16/
 {
     $t = nsecs;
-    $sa = (uint8 *)args->umyaddr;
+    $sa = (uint8 *)args.umyaddr;
     $family = *(uint16 *)$sa;
     // Port is at offset 2 in both sockaddr_in and sockaddr_in6 (big-endian)
-    $port_be = *(uint16 *)($sa + 2);
-    $port = ($port_be >> 8) | (($port_be & 0xff) << 8);
+    $port = ntohs(*(uint16 *)($sa + 2));
 
     if ($family == 2) {  // AF_INET
         $addr = ntop(*(uint32 *)($sa + 4));
         printf("%s.%03d      %-10s fd=%d AF_INET %s:%d\n",
-            ts_str($t), ts_ms($t), "!BIND", args->fd, $addr, $port);
+            ts_str($t), ts_ms($t), "!BIND", args.fd, $addr, $port);
     } else if ($family == 10) {  // AF_INET6
         printf("%s.%03d      %-10s fd=%d AF_INET6 port=%d\n",
-            ts_str($t), ts_ms($t), "!BIND", args->fd, $port);
+            ts_str($t), ts_ms($t), "!BIND", args.fd, $port);
     } else if ($family == 1) {  // AF_UNIX
         $path = str($sa + 2);
         printf("%s.%03d      %-10s fd=%d AF_UNIX %s\n",
-            ts_str($t), ts_ms($t), "!BIND", args->fd, $path);
+            ts_str($t), ts_ms($t), "!BIND", args.fd, $path);
     } else {
         printf("%s.%03d      %-10s fd=%d family=%d\n",
-            ts_str($t), ts_ms($t), "!BIND", args->fd, $family);
+            ts_str($t), ts_ms($t), "!BIND", args.fd, $family);
     }
 }
 
@@ -339,7 +309,7 @@ tracepoint:syscalls:sys_enter_listen
 {
     $t = nsecs;
     printf("%s.%03d      %-10s fd=%d backlog=%d\n",
-        ts_str($t), ts_ms($t), "!LISTEN", args->fd, args->backlog);
+        ts_str($t), ts_ms($t), "!LISTEN", args.fd, args.backlog);
 }
 
 // accept / accept4 — accepting an incoming connection.
@@ -348,7 +318,7 @@ tracepoint:syscalls:sys_enter_accept
 {
     $t = nsecs;
     printf("%s.%03d      %-10s fd=%d\n",
-        ts_str($t), ts_ms($t), "!ACCEPT", args->fd);
+        ts_str($t), ts_ms($t), "!ACCEPT", args.fd);
 }
 
 tracepoint:syscalls:sys_enter_accept4
@@ -356,7 +326,7 @@ tracepoint:syscalls:sys_enter_accept4
 {
     $t = nsecs;
     printf("%s.%03d      %-10s fd=%d\n",
-        ts_str($t), ts_ms($t), "!ACCEPT", args->fd);
+        ts_str($t), ts_ms($t), "!ACCEPT", args.fd);
 }
 
 // ========================================================================
@@ -370,7 +340,7 @@ tracepoint:syscalls:sys_enter_process_vm_readv
 {
     $t = nsecs;
     printf("%s.%03d      %-10s target_pid=%ld\n",
-        ts_str($t), ts_ms($t), "!VM_READ", args->pid);
+        ts_str($t), ts_ms($t), "!VM_READ", args.pid);
 }
 
 tracepoint:syscalls:sys_enter_process_vm_writev
@@ -378,7 +348,7 @@ tracepoint:syscalls:sys_enter_process_vm_writev
 {
     $t = nsecs;
     printf("%s.%03d      %-10s target_pid=%ld\n",
-        ts_str($t), ts_ms($t), "!VM_WRITE", args->pid);
+        ts_str($t), ts_ms($t), "!VM_WRITE", args.pid);
 }
 
 // ========================================================================
@@ -393,7 +363,7 @@ tracepoint:syscalls:sys_enter_unshare
 {
     $t = nsecs;
     printf("%s.%03d      %-10s flags=0x%lx\n",
-        ts_str($t), ts_ms($t), "!UNSHARE", args->unshare_flags);
+        ts_str($t), ts_ms($t), "!UNSHARE", args.unshare_flags);
 }
 
 tracepoint:syscalls:sys_enter_chroot
@@ -401,7 +371,7 @@ tracepoint:syscalls:sys_enter_chroot
 {
     $t = nsecs;
     printf("%s.%03d      %-10s %s\n",
-        ts_str($t), ts_ms($t), "!CHROOT", str(args->filename));
+        ts_str($t), ts_ms($t), "!CHROOT", str(args.filename));
 }
 
 tracepoint:syscalls:sys_enter_pivot_root
@@ -410,7 +380,7 @@ tracepoint:syscalls:sys_enter_pivot_root
     $t = nsecs;
     printf("%s.%03d      %-10s %s -> %s\n",
         ts_str($t), ts_ms($t), "!PIVROOT",
-        str(args->new_root), str(args->put_old));
+        str(args.new_root), str(args.put_old));
 }
 
 // ========================================================================
@@ -421,19 +391,19 @@ tracepoint:syscalls:sys_enter_pivot_root
 // Classic shellcode injection: allocate RW memory, write payload, flip
 // to executable with mprotect.
 tracepoint:syscalls:sys_enter_mprotect
-/@watched[(int64)pid] && (args->prot & 0x4)/
+/@watched[(int64)pid] && (args.prot & 0x4)/
 {
     $t = nsecs;
     printf("%s.%03d      %-10s addr=0x%lx len=%lu prot=0x%lx\n",
         ts_str($t), ts_ms($t), "!MPROT_X",
-        args->start, args->len, args->prot);
+        args.start, args.len, args.prot);
 }
 
 // prctl PR_SET_DUMPABLE=0 (arg0=4, arg1=0) — makes the process
 // non-dumpable, preventing core dumps and /proc/pid/mem reads.
 // Anti-forensics technique to hide process memory from inspection.
 tracepoint:syscalls:sys_enter_prctl
-/@watched[(int64)pid] && args->option == 4 && args->arg2 == 0/
+/@watched[(int64)pid] && args.option == 4 && args.arg2 == 0/
 {
     $t = nsecs;
     printf("%s.%03d      %-10s PR_SET_DUMPABLE=0\n",
@@ -447,7 +417,7 @@ tracepoint:syscalls:sys_enter_seccomp
 {
     $t = nsecs;
     printf("%s.%03d      %-10s op=%u flags=%u\n",
-        ts_str($t), ts_ms($t), "!SECCOMP", args->op, args->flags);
+        ts_str($t), ts_ms($t), "!SECCOMP", args.op, args.flags);
 }
 
 // personality — changing process execution domain. Can be used to
@@ -457,7 +427,7 @@ tracepoint:syscalls:sys_enter_personality
 {
     $t = nsecs;
     printf("%s.%03d      %-10s persona=0x%lx\n",
-        ts_str($t), ts_ms($t), "!PERSONA", args->personality);
+        ts_str($t), ts_ms($t), "!PERSONA", args.personality);
 }
 
 // userfaultfd — used in kernel race-condition exploits. No legitimate
@@ -467,7 +437,7 @@ tracepoint:syscalls:sys_enter_userfaultfd
 {
     $t = nsecs;
     printf("%s.%03d      %-10s flags=0x%x\n",
-        ts_str($t), ts_ms($t), "!UFFD", args->flags);
+        ts_str($t), ts_ms($t), "!UFFD", args.flags);
 }
 
 // ========================================================================
@@ -482,7 +452,7 @@ tracepoint:syscalls:sys_enter_symlinkat
     $t = nsecs;
     printf("%s.%03d      %-10s %s -> %s\n",
         ts_str($t), ts_ms($t), "!SYMLINK",
-        str(args->oldname), str(args->newname));
+        str(args.oldname), str(args.newname));
 }
 
 tracepoint:syscalls:sys_enter_linkat
@@ -491,7 +461,7 @@ tracepoint:syscalls:sys_enter_linkat
     $t = nsecs;
     printf("%s.%03d      %-10s %s -> %s\n",
         ts_str($t), ts_ms($t), "!HARDLINK",
-        str(args->oldname), str(args->newname));
+        str(args.oldname), str(args.newname));
 }
 
 // ========================================================================
@@ -505,7 +475,7 @@ tracepoint:syscalls:sys_enter_keyctl
 {
     $t = nsecs;
     printf("%s.%03d      %-10s operation=%d\n",
-        ts_str($t), ts_ms($t), "!KEYCTL", args->option);
+        ts_str($t), ts_ms($t), "!KEYCTL", args.option);
 }
 
 // ========================================================================
@@ -518,17 +488,17 @@ tracepoint:syscalls:sys_enter_reboot
 {
     $t = nsecs;
     printf("%s.%03d      %-10s magic=0x%x cmd=0x%x\n",
-        ts_str($t), ts_ms($t), "!REBOOT", args->magic1, args->cmd);
+        ts_str($t), ts_ms($t), "!REBOOT", args.magic1, args.cmd);
 }
 
 // kill — sending signals to processes outside the watched tree could be
 // used to interfere with monitoring or other system processes.
 tracepoint:syscalls:sys_enter_kill
-/@watched[(int64)pid] && !@watched[(int64)args->pid] && args->pid > 0/
+/@watched[(int64)pid] && !@watched[(int64)args.pid] && args.pid > 0/
 {
     $t = nsecs;
     printf("%s.%03d      %-10s target_pid=%d signal=%d\n",
-        ts_str($t), ts_ms($t), "!KILL_EXT", args->pid, args->sig);
+        ts_str($t), ts_ms($t), "!KILL_EXT", args.pid, args.sig);
 }
 
 // ========================================================================
@@ -539,33 +509,15 @@ tracepoint:syscalls:sys_enter_kill
 // binaries is a classic privilege escalation technique. A process could
 // compile a helper binary and make it setuid-root.
 tracepoint:syscalls:sys_enter_fchmodat
-/@watched[(int64)pid] && (args->mode & 06000)/
+/@watched[(int64)pid] && (args.mode & 06000)/
 {
     $t = nsecs;
     printf("%s.%03d      %-10s %s (mode %o — setuid/setgid!)\n",
         ts_str($t), ts_ms($t), "!SUID_CHM",
-        str(args->filename), args->mode);
-}
-
-// --- Process tracking ---
-
-tracepoint:sched:sched_process_exit
-/(@watched[(int64)pid]) && tid == pid/
-{
-    delete(@watched[(int64)pid]);
-}
-
-tracepoint:sched:sched_process_exit
-/(tid == (uint64)@root_pid)/
-{
-    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
-    exit();
+        str(args.filename), args.mode);
 }
 
 END
 {
-    clear(@watched);
-    clear(@open_path);
-    clear(@open_write);
-    delete(@root_pid);
+    clear(@sus_open);
 }

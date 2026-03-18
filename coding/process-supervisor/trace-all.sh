@@ -2,8 +2,8 @@
 #
 # trace-all.sh
 #
-# Runs all trace-*.bt bpftrace scripts in the same directory in parallel
-# against the same target PID. Ctrl-C stops all.
+# Concatenates trace-common.bt with all trace-*.bt modules and runs
+# them as a single bpftrace process against the target PID.
 #
 # Usage: sudo ./trace-all.sh <PID>
 
@@ -18,15 +18,39 @@ fi
 
 PID="$1"
 
-# Kill all child bpftrace processes on exit
-cleanup() {
-    kill 0 2>/dev/null
-    wait 2>/dev/null
-}
-trap cleanup EXIT INT TERM QUIT HUP
+# Build combined script: common preamble + all tracer modules + postamble
+COMBINED=$(mktemp "/tmp/trace-all.XXXXXX.bt")
+trap 'rm -f "$COMBINED"' EXIT INT TERM QUIT HUP
 
-for script in "$SCRIPT_DIR"/trace-*.bt; do
-    bpftrace "$script" "$PID" &
+cat "$SCRIPT_DIR/trace-common.bt" > "$COMBINED"
+
+for module in "$SCRIPT_DIR"/trace-{execs,files,netcalls,suspicious}.bt; do
+    cat "$module" >> "$COMBINED"
 done
 
-wait
+# Shared postamble: process-exit cleanup and root-exit handler
+cat >> "$COMBINED" << 'POSTAMBLE'
+
+// --- Shared process tracking (appended by trace-all.sh) ---
+
+tracepoint:sched:sched_process_exit
+/(@watched[(int64)pid]) && tid == pid/
+{
+    delete(@watched[(int64)pid]);
+}
+
+tracepoint:sched:sched_process_exit
+/(tid == (uint64)@root_pid)/
+{
+    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
+    exit();
+}
+
+END
+{
+    clear(@watched);
+    delete(@root_pid);
+}
+POSTAMBLE
+
+bpftrace -B line "$COMBINED" "$PID"

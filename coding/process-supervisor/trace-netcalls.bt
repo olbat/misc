@@ -1,9 +1,8 @@
-#!/usr/bin/env bpftrace
 /*
- * trace-netcalls.bt
+ * trace-netcalls.bt — Network tracer module
  *
  * Monitor outbound network calls (TCP connect, DNS lookups, data transfer)
- * made by a specific process and its descendants.
+ * made by the watched process tree.
  *
  * Consecutive TCP send/receive events for the same connection are aggregated
  * into a single line showing total bytes and call count.
@@ -12,27 +11,18 @@
  * user-space pointer reads that silently fail on kernel 5.5+
  * (bpf_probe_read vs bpf_probe_read_user).
  *
- * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.21
- * Usage: sudo bpftrace trace-netcalls.bt <PID>
+ * Requires trace-common.bt preamble:
+ *   cat trace-common.bt trace-netcalls.bt | sudo bpftrace - <PID>
  */
-
-config = { unstable_macro=enable; }
 
 // --- Macros ---
 
-// Timestamp: HH:MM:SS string and milliseconds within the current second
-macro ts_str(t) { strftime("%H:%M:%S", t) }
-macro ts_ms(t)  { (t % 1000000000) / 1000000 }
-
-// Network to host byte order for 16-bit values
-macro ntohs(raw) { ((raw >> 8) | ((raw & 0xff) << 8)) }
-
 // Print a TCP event using sock struct fields (IPv6 only, IPv4 uses aggregation).
 macro log_sock_event_v6($sk, event, size, $t) {
-    $dport_v6 = ntohs($sk->__sk_common.skc_dport);
+    $dport_v6 = ntohs($sk.__sk_common.skc_dport);
     printf("%s.%03d      %-10s [%s]:%d (%d bytes)\n",
         ts_str($t), ts_ms($t), event,
-        ntop(10, $sk->__sk_common.skc_v6_daddr.in6_u.u6_addr8), $dport_v6, size);
+        ntop(10, $sk.__sk_common.skc_v6_daddr.in6_u.u6_addr8), $dport_v6, size);
 }
 
 // Print an aggregated IPv4 TCP event — all values passed as args.
@@ -76,8 +66,8 @@ macro flush_agg(@ac, @at, @atm, @ai, @adp, @hbi, @ab) {
 // Resolves destination from msg_name (unconnected) or sock (connected).
 // msg_name is kernel-space at kprobe:udp_sendmsg (copied by move_addr_to_kernel).
 macro log_udp4($sk, $msg, size, $t) {
-    if ($msg->msg_name != 0) {
-        $name_u4 = (uint64)$msg->msg_name;
+    if ($msg.msg_name != 0) {
+        $name_u4 = (uint64)$msg.msg_name;
         $port_u4 = (*(uint8 *)($name_u4 + 2) << 8) | *(uint8 *)($name_u4 + 3);
         if ($port_u4 == 53) {
             printf("%s.%03d      %-10s %s:53 (%d bytes)\n",
@@ -89,23 +79,23 @@ macro log_udp4($sk, $msg, size, $t) {
                 ntop(2, *(uint32 *)($name_u4 + 4)), $port_u4, size);
         }
     } else {
-        $port_u4c = ntohs($sk->__sk_common.skc_dport);
+        $port_u4c = ntohs($sk.__sk_common.skc_dport);
         if ($port_u4c == 53) {
             printf("%s.%03d      %-10s %s:53 (%d bytes)\n",
                 ts_str($t), ts_ms($t), "DNS",
-                ntop(2, $sk->__sk_common.skc_daddr), size);
+                ntop(2, $sk.__sk_common.skc_daddr), size);
         } else {
             printf("%s.%03d      %-10s %s:%d (%d bytes)\n",
                 ts_str($t), ts_ms($t), "TX_UDP",
-                ntop(2, $sk->__sk_common.skc_daddr), $port_u4c, size);
+                ntop(2, $sk.__sk_common.skc_daddr), $port_u4c, size);
         }
     }
 }
 
 // Print an IPv6 UDP event (DNS or TX_UDP).
 macro log_udp6($sk, $msg, size, $t) {
-    if ($msg->msg_name != 0) {
-        $name_u6 = (uint64)$msg->msg_name;
+    if ($msg.msg_name != 0) {
+        $name_u6 = (uint64)$msg.msg_name;
         $port_u6 = (*(uint8 *)($name_u6 + 2) << 8) | *(uint8 *)($name_u6 + 3);
         // sockaddr_in6: sin6_addr at offset 8, 16 bytes
         if ($port_u6 == 53) {
@@ -118,41 +108,20 @@ macro log_udp6($sk, $msg, size, $t) {
                 ntop(10, $name_u6 + 8), $port_u6, size);
         }
     } else {
-        $port_u6c = ntohs($sk->__sk_common.skc_dport);
+        $port_u6c = ntohs($sk.__sk_common.skc_dport);
         if ($port_u6c == 53) {
             printf("%s.%03d      %-10s [%s]:53 (%d bytes)\n",
                 ts_str($t), ts_ms($t), "DNS",
-                ntop(10, $sk->__sk_common.skc_v6_daddr.in6_u.u6_addr8), size);
+                ntop(10, $sk.__sk_common.skc_v6_daddr.in6_u.u6_addr8), size);
         } else {
             printf("%s.%03d      %-10s [%s]:%d (%d bytes)\n",
                 ts_str($t), ts_ms($t), "TX_UDP",
-                ntop(10, $sk->__sk_common.skc_v6_daddr.in6_u.u6_addr8), $port_u6c, size);
+                ntop(10, $sk.__sk_common.skc_v6_daddr.in6_u.u6_addr8), $port_u6c, size);
         }
     }
 }
 
 // --- Probes ---
-
-BEGIN
-{
-    if ($1 == 0) {
-        printf("Usage: sudo bpftrace trace-netcalls.bt <PID>\n");
-        exit();
-    }
-    printf("Monitoring network calls of PID %d (and their children)...\n", $1);
-    printf("%-20s %-10s %s\n", "TIME", "EVENT", "DETAILS");
-    printf("%-20s %-10s %s\n", "----", "-----", "-------");
-
-    @root_pid = $1;
-    @watched[($1)] = 1;
-}
-
-tracepoint:sched:sched_process_fork
-{
-    if (@watched[(int64)pid]) {
-        @watched[args->child_pid] = 1;
-    }
-}
 
 /*
  * Hostname resolution — uprobe on libc's getaddrinfo.
@@ -173,57 +142,57 @@ uprobe:/usr/lib/libc.so.6:getaddrinfo
 
 // TCP connect via socket state change (newstate 2 = TCP_SYN_SENT)
 tracepoint:sock:inet_sock_set_state
-/args->newstate == 2 && @watched[(int64)pid]/
+/args.newstate == 2 && @watched[(int64)pid]/
 {
     flush_agg(@agg_count, @agg_type, @agg_time, @agg_ip, @agg_dport, @host_by_ip, @agg_bytes);
 
     $t = nsecs;
-    if (args->family == 2) {
-        $daddr = (uint32)args->daddr[0] | ((uint32)args->daddr[1] << 8)
-            | ((uint32)args->daddr[2] << 16) | ((uint32)args->daddr[3] << 24);
+    if (args.family == 2) {
+        $daddr = (uint32)args.daddr[0] | ((uint32)args.daddr[1] << 8)
+            | ((uint32)args.daddr[2] << 16) | ((uint32)args.daddr[3] << 24);
         if (@resolve_host[pid] != "") {
             @ip_to_host[$daddr] = @resolve_host[pid];
-            @host_by_ip[ntop(2, args->daddr)] = @resolve_host[pid];
+            @host_by_ip[ntop(2, args.daddr)] = @resolve_host[pid];
         }
         if (@ip_to_host[$daddr] != "") {
             printf("%s.%03d      %-10s %s:%d [%s]\n",
                 ts_str($t), ts_ms($t), "CONNECT",
-                ntop(2, args->daddr), args->dport, @ip_to_host[$daddr]);
+                ntop(2, args.daddr), args.dport, @ip_to_host[$daddr]);
         } else {
             printf("%s.%03d      %-10s %s:%d\n",
                 ts_str($t), ts_ms($t), "CONNECT",
-                ntop(2, args->daddr), args->dport);
+                ntop(2, args.daddr), args.dport);
         }
     }
-    else if (args->family == 10) {
+    else if (args.family == 10) {
         printf("%s.%03d      %-10s [%s]:%d\n",
             ts_str($t), ts_ms($t), "CONNECT",
-            ntop(10, args->daddr_v6), args->dport);
+            ntop(10, args.daddr_v6), args.dport);
     }
 }
 
 // TCP disconnect via socket state change (newstate 7 = TCP_CLOSE)
 tracepoint:sock:inet_sock_set_state
-/args->newstate == 7 && @watched[(int64)pid]/
+/args.newstate == 7 && @watched[(int64)pid]/
 {
     flush_agg(@agg_count, @agg_type, @agg_time, @agg_ip, @agg_dport, @host_by_ip, @agg_bytes);
 
     $t = nsecs;
-    if (args->family == 2) {
-        $ip = ntop(2, args->daddr);
+    if (args.family == 2) {
+        $ip = ntop(2, args.daddr);
         if (@host_by_ip[$ip] != "") {
             printf("%s.%03d      %-10s %s:%d [%s]\n",
                 ts_str($t), ts_ms($t), "CLOSE",
-                $ip, args->dport, @host_by_ip[$ip]);
+                $ip, args.dport, @host_by_ip[$ip]);
         } else {
             printf("%s.%03d      %-10s %s:%d\n",
-                ts_str($t), ts_ms($t), "CLOSE", $ip, args->dport);
+                ts_str($t), ts_ms($t), "CLOSE", $ip, args.dport);
         }
     }
-    else if (args->family == 10) {
+    else if (args.family == 10) {
         printf("%s.%03d      %-10s [%s]:%d\n",
             ts_str($t), ts_ms($t), "CLOSE",
-            ntop(10, args->daddr_v6), args->dport);
+            ntop(10, args.daddr_v6), args.dport);
     }
 }
 
@@ -236,12 +205,12 @@ kprobe:tcp_sendmsg
 {
     $t = nsecs;
     $sk = (struct sock *)arg0;
-    $family = $sk->__sk_common.skc_family;
+    $family = $sk.__sk_common.skc_family;
     $size = (uint64)arg2;
 
     if ($family == 2) {
-        $daddr = $sk->__sk_common.skc_daddr;
-        $dport = ntohs($sk->__sk_common.skc_dport);
+        $daddr = $sk.__sk_common.skc_daddr;
+        $dport = ntohs($sk.__sk_common.skc_dport);
 
         if (@agg_type[pid] == 1 && @agg_daddr[pid] == $daddr && @agg_dport[pid] == $dport) {
             // Same connection, same direction: accumulate
@@ -271,11 +240,11 @@ kprobe:tcp_cleanup_rbuf
     $sk = (struct sock *)arg0;
     $sz = (int64)arg1;
     if ($sz > 0) {
-        $family = $sk->__sk_common.skc_family;
+        $family = $sk.__sk_common.skc_family;
 
         if ($family == 2) {
-            $daddr = $sk->__sk_common.skc_daddr;
-            $dport = ntohs($sk->__sk_common.skc_dport);
+            $daddr = $sk.__sk_common.skc_daddr;
+            $dport = ntohs($sk.__sk_common.skc_dport);
 
             if (@agg_type[pid] == 2 && @agg_daddr[pid] == $daddr && @agg_dport[pid] == $dport) {
                 @agg_bytes[pid] += (uint64)$sz;
@@ -319,26 +288,15 @@ kprobe:udpv6_sendmsg
     log_udp6($sk, $msg, (uint64)arg2, $t);
 }
 
-// Stop watching processes that have exited (only when main thread exits)
+// Flush pending aggregation when a watched process exits
 tracepoint:sched:sched_process_exit
 /(@watched[(int64)pid]) && tid == pid/
 {
-    // Flush pending aggregation for this process
     flush_agg(@agg_count, @agg_type, @agg_time, @agg_ip, @agg_dport, @host_by_ip, @agg_bytes);
-    delete(@watched[(int64)pid]);
-}
-
-// Exit when the root process's main thread exits
-tracepoint:sched:sched_process_exit
-/(tid == (uint64)@root_pid)/
-{
-    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
-    exit();
 }
 
 END
 {
-    clear(@watched);
     clear(@ip_to_host);
     clear(@host_by_ip);
     clear(@resolve_host);
@@ -349,5 +307,4 @@ END
     clear(@agg_bytes);
     clear(@agg_count);
     clear(@agg_time);
-    delete(@root_pid);
 }
