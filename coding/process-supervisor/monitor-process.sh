@@ -2,7 +2,7 @@
 #
 # monitor-process.sh
 #
-# Builds a combined bpftrace script from trace-common.bt and the enabled
+# Builds a combined bpftrace script from common.bt and the enabled
 # tracer modules (execs, files, netcalls, suspicious), then runs a single
 # bpftrace process with elevated privileges to monitor a process and all
 # its descendants.
@@ -154,14 +154,14 @@ if [[ -z "$ATTACH_PID" && $# -eq 0 ]]; then
 fi
 
 # --- Build combined bpftrace script ---
-# Concatenate trace-common.bt (shared preamble) with enabled tracer
-# modules, then append a shared postamble for process-exit cleanup.
-# Tracer-specific exit handlers (e.g. netcalls flush_agg) are placed
-# before the shared handler so they fire first.
+# Concatenate common.bt (shared preamble) with enabled tracer
+# modules, then append cleanup.bt for process-exit teardown.
+# Tracer-specific END handlers (e.g. netcalls flush_agg) are placed
+# before cleanup so they fire first.
 TRACERS_ENABLED=0
 COMBINED_SCRIPT=$(mktemp "/tmp/monitor-combined.XXXXXX.bt")
 
-cat "$SCRIPT_DIR/trace-common.bt" >> "$COMBINED_SCRIPT"
+cat "$SCRIPT_DIR/common.bt" >> "$COMBINED_SCRIPT"
 
 if [[ "$TRACE_EXECS" -eq 1 ]]; then
     echo "[monitor-process] Including exec tracer"
@@ -193,32 +193,10 @@ if [[ "$TRACERS_ENABLED" -eq 0 ]]; then
     exit 1
 fi
 
-# Append shared postamble: process-exit cleanup and root-exit handler.
-# This must come AFTER all tracer modules so that tracer-specific exit
-# handlers (e.g. netcalls flush_agg) fire before @watched is cleaned up.
-cat >> "$COMBINED_SCRIPT" << 'POSTAMBLE'
-
-// --- Shared process tracking (appended by monitor-process.sh) ---
-
-tracepoint:sched:sched_process_exit
-/(@watched[(int64)pid]) && tid == pid/
-{
-    $_ = delete(@watched[(int64)pid]);
-}
-
-tracepoint:sched:sched_process_exit
-/(tid == (uint64)@root_pid)/
-{
-    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
-    exit();
-}
-
-END
-{
-    clear(@watched);
-    $_ = delete(@root_pid);
-}
-POSTAMBLE
+# Append shared cleanup: process-exit shrinking and root-exit handler.
+# Must come AFTER all tracer modules so that tracer-specific END handlers
+# (e.g. netcalls flush_agg) fire before @watched is cleared.
+cat "$SCRIPT_DIR/cleanup.bt" >> "$COMBINED_SCRIPT"
 
 # --- Output setup ---
 # In attach mode, default to stdout (no interleaving risk since we

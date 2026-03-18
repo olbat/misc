@@ -1,0 +1,37 @@
+/*
+ * cleanup.bt
+ *
+ * Shared cleanup for process monitoring scripts. Handles process-tree
+ * shrinking and stops the tracer when the root process exits.
+ *
+ * Must be concatenated AFTER all tracer modules (common.bt first,
+ * then modules, then this file) so that module-specific END handlers
+ * (e.g. the netcalls aggregation flush) fire before @watched is cleared:
+ *
+ *   cat common.bt trace-files.bt cleanup.bt | sudo bpftrace - <PID>
+ *
+ * Not intended to be run standalone.
+ *
+ * Requires: common.bt preamble (defines @watched, @root_pid)
+ */
+
+// Remove a watched process from tracking when it exits
+tracepoint:sched:sched_process_exit
+/(@watched[(int64)pid]) && tid == pid/
+{
+    $_ = delete(@watched[(int64)pid]);
+}
+
+// Stop tracing when the root process exits
+tracepoint:sched:sched_process_exit
+/(tid == (uint64)@root_pid)/
+{
+    printf("\nRoot process %d exited. Stopping monitor.\n", @root_pid);
+    exit();
+}
+
+END
+{
+    clear(@watched);
+    $_ = delete(@root_pid);
+}

@@ -1,5 +1,5 @@
 /*
- * trace-common.bt
+ * common.bt
  *
  * Shared preamble for process monitoring scripts. Provides timestamp
  * macros, process-tree tracking, and lifecycle management.
@@ -7,7 +7,7 @@
  * Not intended to be run standalone. Combined with tracer modules by
  * monitor-process.sh (or manually via cat):
  *
- *   cat trace-common.bt trace-files.bt | sudo bpftrace - <PID>
+ *   cat common.bt trace-files.bt cleanup.bt | sudo bpftrace - <PID>
  *
  * Requires: kernel BTF support (CONFIG_DEBUG_INFO_BTF=y), bpftrace >= 0.25
  */
