@@ -11,8 +11,8 @@
  * user-space pointer reads that silently fail on kernel 5.5+
  * (bpf_probe_read vs bpf_probe_read_user).
  *
- * Requires trace-common.bt preamble:
- *   cat trace-common.bt trace-netcalls.bt | sudo bpftrace - <PID>
+ * Requires common.bt preamble and cleanup.bt:
+ *   cat common.bt trace-netcalls.bt cleanup.bt | sudo bpftrace - <PID>
  */
 
 // --- Macros ---

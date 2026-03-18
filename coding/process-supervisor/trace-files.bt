@@ -4,8 +4,8 @@
  * Monitor file operations (open, read, write, mkdir, delete, rename,
  * chmod, chown) made by the watched process tree.
  *
- * Requires trace-common.bt preamble:
- *   cat trace-common.bt trace-files.bt | sudo bpftrace - <PID>
+ * Requires common.bt preamble and cleanup.bt:
+ *   cat common.bt trace-files.bt cleanup.bt | sudo bpftrace - <PID>
  */
 
 // --- File open ---

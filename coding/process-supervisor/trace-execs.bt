@@ -5,8 +5,8 @@
  * For each exec() call, print the timestamp, caller comm/PID, and full
  * command with args.
  *
- * Requires trace-common.bt preamble:
- *   cat trace-common.bt trace-execs.bt | sudo bpftrace - <PID>
+ * Requires common.bt preamble and cleanup.bt:
+ *   cat common.bt trace-execs.bt cleanup.bt | sudo bpftrace - <PID>
  */
 
 // On exec, if the process is watched, log the command

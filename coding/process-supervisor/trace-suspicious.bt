@@ -21,8 +21,8 @@
  *   - Destructive actions (reboot, kill outside watched tree)
  *   - Permission manipulation (setting setuid/setgid bits)
  *
- * Requires trace-common.bt preamble:
- *   cat trace-common.bt trace-suspicious.bt | sudo bpftrace - <PID>
+ * Requires common.bt preamble and cleanup.bt:
+ *   cat common.bt trace-suspicious.bt cleanup.bt | sudo bpftrace - <PID>
  */
 
 // ========================================================================
